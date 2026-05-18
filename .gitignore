@@ -3,6 +3,7 @@ dist/
 build/
 .DS_Store
 *.log
+CONTEXT.md
 
 # env files (NEVER commit these)
 .env
