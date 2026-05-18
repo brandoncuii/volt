@@ -1,0 +1,19 @@
+node_modules/
+dist/
+build/
+.DS_Store
+*.log
+
+# env files (NEVER commit these)
+.env
+.env.local
+.env.*.local
+.env.production
+
+# editor
+.vscode/
+.idea/
+
+# AWS/serverless
+.serverless/
+.aws-sam/
