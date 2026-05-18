@@ -12,6 +12,7 @@ interface RawStation {
     street?: string;
     city?: string;
     state?: string;
+    country?: string;
   };
   gps?: {
     latitude?: number;
@@ -35,7 +36,7 @@ export function loadSuperchargers(): Supercharger[] {
     .filter(
       (s) =>
         s.status === 'OPEN' &&
-        s.address?.state === 'CA' &&
+        s.address?.country === 'USA' &&
         typeof s.gps?.latitude === 'number' &&
         typeof s.gps?.longitude === 'number',
     )
