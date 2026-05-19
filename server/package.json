@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
+    "test": "vitest run",
     "start": "node dist/index.js"
   },
   "keywords": [],
@@ -17,12 +18,14 @@
     "@types/express": "^5.0.6",
     "@types/node": "^25.9.0",
     "tsx": "^4.22.2",
-    "typescript": "^6.0.3"
+    "typescript": "^6.0.3",
+    "vitest": "^4.1.6"
   },
   "dependencies": {
     "@volt/shared": "*",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "express-rate-limit": "^8.5.2"
   }
 }

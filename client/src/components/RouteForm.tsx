@@ -9,7 +9,7 @@ import type { PlaceValue } from '@/lib/maps';
 import { miToKm } from '@/lib/units';
 
 interface Props {
-  onSubmit: (req: RouteRequest, labels: { start: string; end: string }) => void;
+  onSubmit: (req: RouteRequest) => void;
   loading: boolean;
 }
 
@@ -25,16 +25,13 @@ export function RouteForm({ onSubmit, loading }: Props) {
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!start || !end) return;
-    onSubmit(
-      {
-        start: { lat: start.lat, lng: start.lng },
-        end: { lat: end.lat, lng: end.lng },
-        vehicleRangeKm: miToKm(vehicleRangeMi),
-        startBatteryPct,
-        minArrivalBatteryPct,
-      },
-      { start: start.description, end: end.description },
-    );
+    onSubmit({
+      start: { lat: start.lat, lng: start.lng },
+      end: { lat: end.lat, lng: end.lng },
+      vehicleRangeKm: miToKm(vehicleRangeMi),
+      startBatteryPct,
+      minArrivalBatteryPct,
+    });
   };
 
   return (
