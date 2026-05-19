@@ -30,6 +30,9 @@ export function PlacesAutocompleteInput({ id, label, placeholder, onChange }: Pr
     el.id = id;
     if (placeholder) el.placeholder = placeholder;
     el.setAttribute('included-region-codes', 'us');
+    // The element reads color-scheme from its ancestor; without this it
+    // follows the OS preference and renders dark in dark-mode systems.
+    el.style.colorScheme = 'light';
 
     const handler = async (e: Event) => {
       // gmp-select fires with placePrediction as a direct property on the event,
@@ -62,7 +65,11 @@ export function PlacesAutocompleteInput({ id, label, placeholder, onChange }: Pr
   return (
     <div className="space-y-2">
       <Label htmlFor={id}>{label}</Label>
-      <div ref={containerRef} className="[&_gmp-place-autocomplete]:w-full" />
+      <div
+        ref={containerRef}
+        style={{ colorScheme: 'light' }}
+        className="[&_gmp-place-autocomplete]:w-full [&_gmp-place-autocomplete]:rounded-md [&_gmp-place-autocomplete]:border [&_gmp-place-autocomplete]:border-input [&_gmp-place-autocomplete]:shadow-xs"
+      />
     </div>
   );
 }
