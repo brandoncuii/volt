@@ -1,4 +1,9 @@
-import type { RouteResponse } from '@volt/shared';
+import type {
+  RouteResponse,
+  PlacesResponse,
+  Restaurant,
+  PriceLevel,
+} from '@volt/shared';
 import {
   Card,
   CardContent,
@@ -7,12 +12,17 @@ import {
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
-import { BatteryCharging, MapPin } from 'lucide-react';
+import { Skeleton } from '@/components/ui/skeleton';
+import { BatteryCharging, MapPin, Star, Utensils } from 'lucide-react';
 import { kmToMi } from '@/lib/units';
 
 interface Props {
   result: RouteResponse;
+  restaurants: PlacesResponse | null;
+  restaurantsLoading: boolean;
 }
+
+const MAX_RESTAURANTS_SHOWN = 4;
 
 function formatDuration(min: number): string {
   const h = Math.floor(min / 60);
@@ -21,7 +31,22 @@ function formatDuration(min: number): string {
   return `${h}h ${m}m`;
 }
 
-export function ResultsPanel({ result }: Props) {
+function priceLevelToDollars(level: PriceLevel | undefined): string {
+  switch (level) {
+    case 'PRICE_LEVEL_INEXPENSIVE':
+      return '$';
+    case 'PRICE_LEVEL_MODERATE':
+      return '$$';
+    case 'PRICE_LEVEL_EXPENSIVE':
+      return '$$$';
+    case 'PRICE_LEVEL_VERY_EXPENSIVE':
+      return '$$$$';
+    default:
+      return '';
+  }
+}
+
+export function ResultsPanel({ result, restaurants, restaurantsLoading }: Props) {
   return (
     <Card>
       <CardHeader>
@@ -85,12 +110,78 @@ export function ResultsPanel({ result }: Props) {
                   {kmToMi(stop.distanceFromPrevKm).toFixed(0)} mi from previous ·{' '}
                   {formatDuration(stop.drivingTimeFromPrevMin)} drive
                 </div>
+
+                <RestaurantList
+                  list={restaurants?.[stop.charger.id]}
+                  loading={restaurantsLoading && !restaurants}
+                />
               </li>
             ))}
           </ol>
         </div>
       </CardContent>
     </Card>
+  );
+}
+
+function RestaurantList({
+  list,
+  loading,
+}: {
+  list: Restaurant[] | undefined;
+  loading: boolean;
+}) {
+  if (loading) {
+    return (
+      <div className="pt-1 space-y-1.5">
+        <Skeleton className="h-3 w-24" />
+        <Skeleton className="h-3 w-full" />
+        <Skeleton className="h-3 w-3/4" />
+      </div>
+    );
+  }
+
+  if (!list) return null;
+
+  if (list.length === 0) {
+    return (
+      <div className="pt-1 flex items-center gap-1.5 text-xs text-muted-foreground">
+        <Utensils className="h-3 w-3" />
+        No restaurants nearby
+      </div>
+    );
+  }
+
+  const shown = list.slice(0, MAX_RESTAURANTS_SHOWN);
+
+  return (
+    <div className="pt-1">
+      <div className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1.5">
+        <Utensils className="h-3 w-3" />
+        Eat nearby
+      </div>
+      <ul className="space-y-1">
+        {shown.map((r) => (
+          <li
+            key={r.id}
+            className="flex items-center gap-2 text-xs"
+          >
+            <span className="truncate">{r.name}</span>
+            {typeof r.rating === 'number' && (
+              <span className="flex items-center gap-0.5 text-muted-foreground shrink-0">
+                <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                {r.rating.toFixed(1)}
+              </span>
+            )}
+            {r.priceLevel && (
+              <span className="text-muted-foreground shrink-0">
+                {priceLevelToDollars(r.priceLevel)}
+              </span>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
   );
 }
 

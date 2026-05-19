@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import type { RouteRequest, RouteResponse } from '@volt/shared';
-import { fetchRoute } from '@/lib/api';
+import type { RouteRequest, RouteResponse, PlacesResponse } from '@volt/shared';
+import { fetchRoute, fetchPlaces } from '@/lib/api';
 import { useGoogleMaps } from '@/lib/maps';
 import { RouteForm } from '@/components/RouteForm';
 import { ResultsPanel } from '@/components/ResultsPanel';
@@ -14,6 +14,8 @@ function App() {
   const { isLoaded, loadError } = useGoogleMaps();
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RouteResponse | null>(null);
+  const [restaurants, setRestaurants] = useState<PlacesResponse | null>(null);
+  const [restaurantsLoading, setRestaurantsLoading] = useState(false);
   const [endpoints, setEndpoints] = useState<{
     start: { lat: number; lng: number };
     end: { lat: number; lng: number };
@@ -22,10 +24,25 @@ function App() {
   const handleSubmit = async (req: RouteRequest) => {
     setLoading(true);
     setResult(null);
+    setRestaurants(null);
     setEndpoints({ start: req.start, end: req.end });
     try {
       const res = await fetchRoute(req);
       setResult(res);
+
+      if (res.stops.length > 0) {
+        setRestaurantsLoading(true);
+        try {
+          const places = await fetchPlaces(res.stops.map((s) => s.charger.id));
+          setRestaurants(places);
+        } catch (e) {
+          // Restaurants are progressive enhancement — don't fail the whole flow.
+          const msg = e instanceof Error ? e.message : 'Places lookup failed';
+          toast.warning('Could not load restaurants', { description: msg });
+        } finally {
+          setRestaurantsLoading(false);
+        }
+      }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Route failed';
       toast.error('Could not plan route', { description: msg });
@@ -55,7 +72,13 @@ function App() {
           ) : (
             <Skeleton className="h-[420px] w-full" />
           )}
-          {result && <ResultsPanel result={result} />}
+          {result && (
+            <ResultsPanel
+              result={result}
+              restaurants={restaurants}
+              restaurantsLoading={restaurantsLoading}
+            />
+          )}
         </aside>
 
         <main className="relative">

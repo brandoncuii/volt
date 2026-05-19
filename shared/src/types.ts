@@ -46,3 +46,28 @@ export interface ApiError {
   error: string;
   details?: string;
 }
+
+// A restaurant near a Supercharger, surfaced by POST /api/places.
+export type PriceLevel =
+  | 'PRICE_LEVEL_INEXPENSIVE'
+  | 'PRICE_LEVEL_MODERATE'
+  | 'PRICE_LEVEL_EXPENSIVE'
+  | 'PRICE_LEVEL_VERY_EXPENSIVE';
+
+export interface Restaurant {
+  id: string;
+  name: string;
+  formattedAddress?: string;
+  location: { lat: number; lng: number };
+  rating?: number;
+  userRatingCount?: number;
+  priceLevel?: PriceLevel;
+}
+
+// What the frontend sends to POST /api/places
+export interface PlacesRequest {
+  chargerIds: string[];
+}
+
+// What the backend returns: chargerId -> top restaurants near that charger
+export type PlacesResponse = Record<string, Restaurant[]>;

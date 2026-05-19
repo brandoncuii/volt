@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import rateLimit from 'express-rate-limit';
 import { routeRouter } from './routes/route.js';
+import { placesRouter } from './routes/places.js';
 
 dotenv.config();
 
@@ -29,6 +30,7 @@ app.get('/api/health', (_req: Request, res: Response) => {
 });
 
 app.use('/api', routeRouter);
+app.use('/api', placesRouter);
 
 const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, () => {

@@ -18,3 +18,7 @@ CONTEXT.md
 # AWS/serverless
 .serverless/
 .aws-sam/
+
+# Runtime caches (populated on demand by the server)
+server/src/data/places-cache.json
+server/src/data/edge-cache.json

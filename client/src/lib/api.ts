@@ -1,10 +1,15 @@
-import type { RouteRequest, RouteResponse, ApiError } from '@volt/shared';
+import type {
+  RouteRequest,
+  RouteResponse,
+  PlacesResponse,
+  ApiError,
+} from '@volt/shared';
 
-export async function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
-  const res = await fetch('/api/route', {
+async function postJson<T>(path: string, body: unknown): Promise<T> {
+  const res = await fetch(path, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(req),
+    body: JSON.stringify(body),
   });
 
   if (!res.ok) {
@@ -12,5 +17,13 @@ export async function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
     throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
   }
 
-  return (await res.json()) as RouteResponse;
+  return (await res.json()) as T;
+}
+
+export function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
+  return postJson<RouteResponse>('/api/route', req);
+}
+
+export function fetchPlaces(chargerIds: string[]): Promise<PlacesResponse> {
+  return postJson<PlacesResponse>('/api/places', { chargerIds });
 }
