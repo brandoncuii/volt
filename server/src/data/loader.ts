@@ -32,11 +32,10 @@ export function loadSuperchargers(): Supercharger[] {
 
   const raw = JSON.parse(readFileSync(DATA_PATH, 'utf8')) as RawStation[];
 
+  // superchargers.json is pre-filtered to US OPEN stations only.
   cached = raw
     .filter(
       (s) =>
-        s.status === 'OPEN' &&
-        s.address?.country === 'USA' &&
         typeof s.gps?.latitude === 'number' &&
         typeof s.gps?.longitude === 'number',
     )
