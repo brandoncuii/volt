@@ -5,15 +5,24 @@ import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import { PlacesAutocompleteInput } from '@/components/PlacesAutocompleteInput';
+import { BrandFilter } from '@/components/BrandFilter';
 import type { PlaceValue } from '@/lib/maps';
 import { miToKm } from '@/lib/units';
+import type { Brand } from '@/lib/brands';
 
 interface Props {
   onSubmit: (req: RouteRequest) => void;
   loading: boolean;
+  selectedBrands: Brand[];
+  onSelectedBrandsChange: (brands: Brand[]) => void;
 }
 
-export function RouteForm({ onSubmit, loading }: Props) {
+export function RouteForm({
+  onSubmit,
+  loading,
+  selectedBrands,
+  onSelectedBrandsChange,
+}: Props) {
   const [start, setStart] = useState<PlaceValue | null>(null);
   const [end, setEnd] = useState<PlaceValue | null>(null);
   const [vehicleRangeMi, setVehicleRangeMi] = useState(250);
@@ -104,6 +113,11 @@ export function RouteForm({ onSubmit, loading }: Props) {
               onValueChange={([v]) => setMinArrivalBatteryPct(v!)}
             />
           </div>
+
+          <BrandFilter
+            selected={selectedBrands}
+            onChange={onSelectedBrandsChange}
+          />
 
           <Button type="submit" disabled={!canSubmit} className="w-full">
             {loading ? 'Planning…' : 'Plan route'}

@@ -34,12 +34,24 @@ function validate(body: unknown): RouteRequest | string {
   )
     return 'minArrivalBatteryPct must be 0–100';
 
+  let excludeChargerIds: string[] | undefined;
+  if (b.excludeChargerIds !== undefined) {
+    if (
+      !Array.isArray(b.excludeChargerIds) ||
+      !b.excludeChargerIds.every((id): id is string => typeof id === 'string')
+    ) {
+      return 'excludeChargerIds must be an array of strings';
+    }
+    excludeChargerIds = b.excludeChargerIds;
+  }
+
   return {
     start: b.start,
     end: b.end,
     vehicleRangeKm: b.vehicleRangeKm,
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
+    ...(excludeChargerIds !== undefined && { excludeChargerIds }),
   };
 }
 
@@ -110,5 +122,33 @@ describe('validate', () => {
     const body = { ...validBody, startBatteryPct: 0, minArrivalBatteryPct: 0 };
     const result = validate(body);
     expect(typeof result).toBe('object');
+  });
+
+  it('accepts an empty excludeChargerIds array', () => {
+    const body = { ...validBody, excludeChargerIds: [] };
+    const result = validate(body);
+    expect(typeof result).toBe('object');
+    expect((result as RouteRequest).excludeChargerIds).toEqual([]);
+  });
+
+  it('accepts excludeChargerIds with string entries', () => {
+    const body = { ...validBody, excludeChargerIds: ['7676', '3294'] };
+    const result = validate(body);
+    expect((result as RouteRequest).excludeChargerIds).toEqual(['7676', '3294']);
+  });
+
+  it('rejects non-array excludeChargerIds', () => {
+    const body = { ...validBody, excludeChargerIds: 'oops' };
+    expect(validate(body)).toBe('excludeChargerIds must be an array of strings');
+  });
+
+  it('rejects excludeChargerIds with non-string entries', () => {
+    const body = { ...validBody, excludeChargerIds: ['7676', 42] };
+    expect(validate(body)).toBe('excludeChargerIds must be an array of strings');
+  });
+
+  it('omits excludeChargerIds when not provided', () => {
+    const result = validate(validBody);
+    expect((result as RouteRequest).excludeChargerIds).toBeUndefined();
   });
 });

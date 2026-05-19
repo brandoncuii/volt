@@ -31,12 +31,24 @@ function validate(body: unknown): RouteRequest | string {
   )
     return 'minArrivalBatteryPct must be 0–100';
 
+  let excludeChargerIds: string[] | undefined;
+  if (b.excludeChargerIds !== undefined) {
+    if (
+      !Array.isArray(b.excludeChargerIds) ||
+      !b.excludeChargerIds.every((id): id is string => typeof id === 'string')
+    ) {
+      return 'excludeChargerIds must be an array of strings';
+    }
+    excludeChargerIds = b.excludeChargerIds;
+  }
+
   return {
     start: b.start,
     end: b.end,
     vehicleRangeKm: b.vehicleRangeKm,
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
+    ...(excludeChargerIds !== undefined && { excludeChargerIds }),
   };
 }
 
@@ -48,7 +60,11 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
   }
 
   try {
-    const chargers = loadSuperchargers();
+    const all = loadSuperchargers();
+    const excluded = new Set(parsed.excludeChargerIds ?? []);
+    const chargers = excluded.size === 0
+      ? all
+      : all.filter((c) => !excluded.has(c.id));
     const result = await planRoute(chargers, parsed);
     return res.json(result);
   } catch (e) {

@@ -13,13 +13,26 @@ import {
 import { Badge } from '@/components/ui/badge';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
-import { BatteryCharging, MapPin, Star, Utensils } from 'lucide-react';
+import {
+  BatteryCharging,
+  MapPin,
+  Star,
+  Utensils,
+  AlertCircle,
+} from 'lucide-react';
 import { kmToMi } from '@/lib/units';
+import {
+  restaurantMatchesAnyBrand,
+  chargerSatisfiesBrands,
+  type Brand,
+} from '@/lib/brands';
+import { cn } from '@/lib/utils';
 
 interface Props {
   result: RouteResponse;
   restaurants: PlacesResponse | null;
   restaurantsLoading: boolean;
+  selectedBrands: Brand[];
 }
 
 const MAX_RESTAURANTS_SHOWN = 4;
@@ -46,7 +59,12 @@ function priceLevelToDollars(level: PriceLevel | undefined): string {
   }
 }
 
-export function ResultsPanel({ result, restaurants, restaurantsLoading }: Props) {
+export function ResultsPanel({
+  result,
+  restaurants,
+  restaurantsLoading,
+  selectedBrands,
+}: Props) {
   return (
     <Card>
       <CardHeader>
@@ -73,50 +91,65 @@ export function ResultsPanel({ result, restaurants, restaurantsLoading }: Props)
           </div>
 
           <ol className="space-y-3">
-            {result.stops.map((stop, i) => (
-              <li
-                key={stop.charger.id}
-                className="rounded-md border p-3 space-y-2"
-              >
-                <div className="flex items-start justify-between gap-2">
-                  <div className="flex items-start gap-2 min-w-0">
-                    <MapPin className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
-                    <div className="min-w-0">
-                      <div className="font-medium truncate">
-                        {i + 1}. {stop.charger.name}
-                      </div>
-                      <div className="text-xs text-muted-foreground truncate">
-                        {stop.charger.address}
+            {result.stops.map((stop, i) => {
+              const list = restaurants?.[stop.charger.id];
+              const offBrand =
+                selectedBrands.length > 0 &&
+                restaurants !== null &&
+                !chargerSatisfiesBrands(list, selectedBrands);
+              return (
+                <li
+                  key={stop.charger.id}
+                  className="rounded-md border p-3 space-y-2"
+                >
+                  <div className="flex items-start justify-between gap-2">
+                    <div className="flex items-start gap-2 min-w-0">
+                      <MapPin className="h-4 w-4 mt-0.5 shrink-0 text-muted-foreground" />
+                      <div className="min-w-0">
+                        <div className="font-medium truncate">
+                          {i + 1}. {stop.charger.name}
+                        </div>
+                        <div className="text-xs text-muted-foreground truncate">
+                          {stop.charger.address}
+                        </div>
                       </div>
                     </div>
+                    <Badge variant="secondary" className="shrink-0">
+                      {stop.charger.powerKW} kW
+                    </Badge>
                   </div>
-                  <Badge variant="secondary" className="shrink-0">
-                    {stop.charger.powerKW} kW
-                  </Badge>
-                </div>
 
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <BatteryCharging className="h-3.5 w-3.5" />
-                  <span>
-                    Arrive {stop.arrivalBatteryPct.toFixed(0)}% → Leave{' '}
-                    {stop.departureBatteryPct.toFixed(0)}%
-                  </span>
-                  <span className="ml-auto">
-                    {formatDuration(stop.chargingTimeMin)} charging
-                  </span>
-                </div>
+                  <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                    <BatteryCharging className="h-3.5 w-3.5" />
+                    <span>
+                      Arrive {stop.arrivalBatteryPct.toFixed(0)}% → Leave{' '}
+                      {stop.departureBatteryPct.toFixed(0)}%
+                    </span>
+                    <span className="ml-auto">
+                      {formatDuration(stop.chargingTimeMin)} charging
+                    </span>
+                  </div>
 
-                <div className="text-xs text-muted-foreground">
-                  {kmToMi(stop.distanceFromPrevKm).toFixed(0)} mi from previous ·{' '}
-                  {formatDuration(stop.drivingTimeFromPrevMin)} drive
-                </div>
+                  <div className="text-xs text-muted-foreground">
+                    {kmToMi(stop.distanceFromPrevKm).toFixed(0)} mi from previous ·{' '}
+                    {formatDuration(stop.drivingTimeFromPrevMin)} drive
+                  </div>
 
-                <RestaurantList
-                  list={restaurants?.[stop.charger.id]}
-                  loading={restaurantsLoading && !restaurants}
-                />
-              </li>
-            ))}
+                  {offBrand && (
+                    <div className="flex items-center gap-1.5 text-xs text-yellow-700">
+                      <AlertCircle className="h-3 w-3" />
+                      No matching brand within 800m
+                    </div>
+                  )}
+
+                  <RestaurantList
+                    list={list}
+                    loading={restaurantsLoading && !restaurants}
+                    selectedBrands={selectedBrands}
+                  />
+                </li>
+              );
+            })}
           </ol>
         </div>
       </CardContent>
@@ -127,9 +160,11 @@ export function ResultsPanel({ result, restaurants, restaurantsLoading }: Props)
 function RestaurantList({
   list,
   loading,
+  selectedBrands,
 }: {
   list: Restaurant[] | undefined;
   loading: boolean;
+  selectedBrands: Brand[];
 }) {
   if (loading) {
     return (
@@ -152,7 +187,16 @@ function RestaurantList({
     );
   }
 
-  const shown = list.slice(0, MAX_RESTAURANTS_SHOWN);
+  // Surface brand matches first so they're always visible in the top-N slice.
+  const sorted =
+    selectedBrands.length > 0
+      ? [...list].sort((a, b) => {
+          const am = restaurantMatchesAnyBrand(a, selectedBrands) ? 0 : 1;
+          const bm = restaurantMatchesAnyBrand(b, selectedBrands) ? 0 : 1;
+          return am - bm;
+        })
+      : list;
+  const shown = sorted.slice(0, MAX_RESTAURANTS_SHOWN);
 
   return (
     <div className="pt-1">
@@ -161,25 +205,31 @@ function RestaurantList({
         Eat nearby
       </div>
       <ul className="space-y-1">
-        {shown.map((r) => (
-          <li
-            key={r.id}
-            className="flex items-center gap-2 text-xs"
-          >
-            <span className="truncate">{r.name}</span>
-            {typeof r.rating === 'number' && (
-              <span className="flex items-center gap-0.5 text-muted-foreground shrink-0">
-                <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
-                {r.rating.toFixed(1)}
-              </span>
-            )}
-            {r.priceLevel && (
-              <span className="text-muted-foreground shrink-0">
-                {priceLevelToDollars(r.priceLevel)}
-              </span>
-            )}
-          </li>
-        ))}
+        {shown.map((r) => {
+          const matches = restaurantMatchesAnyBrand(r, selectedBrands);
+          return (
+            <li
+              key={r.id}
+              className={cn(
+                'flex items-center gap-2 text-xs',
+                matches && 'font-semibold text-foreground',
+              )}
+            >
+              <span className="truncate">{r.name}</span>
+              {typeof r.rating === 'number' && (
+                <span className="flex items-center gap-0.5 text-muted-foreground shrink-0">
+                  <Star className="h-3 w-3 fill-yellow-500 text-yellow-500" />
+                  {r.rating.toFixed(1)}
+                </span>
+              )}
+              {r.priceLevel && (
+                <span className="text-muted-foreground shrink-0">
+                  {priceLevelToDollars(r.priceLevel)}
+                </span>
+              )}
+            </li>
+          );
+        })}
       </ul>
     </div>
   );
