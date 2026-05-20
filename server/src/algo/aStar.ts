@@ -36,6 +36,16 @@ function makeKey(id: string, stopCount: number): string {
   return `${id}#${stopCount}`;
 }
 
+export interface PlanMetrics {
+  expansions: number;        // unique states popped from the heap
+  candidates: number;        // chargers passed in to planRoute
+}
+
+let lastMetrics: PlanMetrics = { expansions: 0, candidates: 0 };
+export function getLastPlanMetrics(): PlanMetrics {
+  return lastMetrics;
+}
+
 function parseKey(key: string): { id: string; stopCount: number } {
   const idx = key.lastIndexOf('#');
   return { id: key.slice(0, idx), stopCount: Number(key.slice(idx + 1)) };
@@ -99,16 +109,19 @@ export async function planRoute(
   arrivalBattery.set(startKey, req.startBatteryPct);
 
   const visited = new Set<string>();
+  let expansions = 0;
 
   while (heap.size > 0) {
     const currentKey = heap.pop()!;
     if (visited.has(currentKey)) continue;
     visited.add(currentKey);
+    expansions++;
 
     const { id: currentId, stopCount: currentStopCount } = parseKey(currentKey);
 
     if (currentId === END_ID) {
       flushEdgeCache();
+      lastMetrics = { expansions, candidates: chargers.length };
       return reconstruct(edgeIn, byId, gScore.get(currentKey)!, currentKey);
     }
 
@@ -170,6 +183,7 @@ export async function planRoute(
   }
 
   flushEdgeCache();
+  lastMetrics = { expansions, candidates: chargers.length };
   if (maxStops !== undefined) {
     throw new Error(`No feasible route found within ${maxStops} stops`);
   }

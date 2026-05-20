@@ -2,12 +2,15 @@ import { Router, Request, Response } from 'express';
 import type { RouteRequest, ApiError } from '@volt/shared';
 import { findBrand } from '@volt/shared';
 import { loadSuperchargers } from '../data/loader.js';
-import { planRoute } from '../algo/aStar.js';
+import { planRoute, getLastPlanMetrics } from '../algo/aStar.js';
 import { chargersInCorridor } from '../graph/corridor.js';
 import {
   filterChargersByBrand,
   flushPlacesCache,
+  getPlacesStats,
+  resetPlacesStats,
 } from '../places/placesClient.js';
+import { getEdgeStats, resetEdgeStats } from '../graph/edges.js';
 
 export const routeRouter = Router();
 
@@ -91,6 +94,10 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
     return res.status(400).json(err);
   }
 
+  resetEdgeStats();
+  resetPlacesStats();
+  const t0 = performance.now();
+
   try {
     const all = loadSuperchargers();
     const excluded = new Set(parsed.excludeChargerIds ?? []);
@@ -98,12 +105,10 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
       ? all
       : all.filter((c) => !excluded.has(c.id));
 
-    // Spatial pre-filter: only consider chargers roughly between start and
-    // end.  Uses a generous 1.4× ellipse so winding roads are covered.
+    const totalChargers = chargers.length;
     chargers = chargersInCorridor(chargers, parsed.start, parsed.end, 1.4);
+    const corridorSize = chargers.length;
 
-    // Server-side brand pre-filter: bound by an ellipse corridor so we only
-    // hit the Places API for chargers actually relevant to this trip.
     if (parsed.restaurantBrandIds && parsed.restaurantBrandIds.length > 0) {
       const brands = parsed.restaurantBrandIds
         .map((id) => findBrand(id))
@@ -116,6 +121,17 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
     }
 
     const result = await planRoute(chargers, parsed);
+    const ms = performance.now() - t0;
+    const pm = getLastPlanMetrics();
+    const es = getEdgeStats();
+    const ps = getPlacesStats();
+    console.log(
+      `[route] all=${totalChargers} corridor=${corridorSize} candidates=${pm.candidates} ` +
+      `expansions=${pm.expansions} stops=${result.stops.length} ` +
+      `edges(hit/miss/haversine)=${es.hits}/${es.misses}/${es.haversineCalls} ` +
+      `places(hit/miss)=${ps.hits}/${ps.misses} ` +
+      `t=${ms.toFixed(0)}ms`,
+    );
     return res.json(result);
   } catch (e) {
     const err: ApiError = {

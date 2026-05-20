@@ -28,6 +28,14 @@ type Cache = Record<string, Restaurant[]>;
 let cache: Cache | null = null;
 let dirty = false;
 
+let stats = { hits: 0, misses: 0 };
+export function resetPlacesStats(): void {
+  stats = { hits: 0, misses: 0 };
+}
+export function getPlacesStats(): { hits: number; misses: number } {
+  return stats;
+}
+
 function loadCache(): Cache {
   if (cache) return cache;
   cache = existsSync(CACHE_PATH)
@@ -105,8 +113,12 @@ export async function getRestaurantsForCharger(
 ): Promise<Restaurant[]> {
   const c = loadCache();
   const hit = c[chargerId];
-  if (hit) return hit;
+  if (hit) {
+    stats.hits++;
+    return hit;
+  }
 
+  stats.misses++;
   const restaurants = await fetchRestaurantsFromGoogle(location);
   c[chargerId] = restaurants;
   dirty = true;

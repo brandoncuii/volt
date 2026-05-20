@@ -1,4 +1,4 @@
-import type { Restaurant } from './types';
+import type { Restaurant } from './types.js';
 
 export interface Brand {
   id: string;

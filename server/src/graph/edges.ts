@@ -24,6 +24,15 @@ type Cache = Record<string, EdgeWeight>;
 let cache: Cache | null = null;
 let dirty = false;
 
+// Per-request stats. Reset by the route handler, read after planRoute.
+let stats = { hits: 0, misses: 0, haversineCalls: 0 };
+export function resetEdgeStats(): void {
+  stats = { hits: 0, misses: 0, haversineCalls: 0 };
+}
+export function getEdgeStats(): { hits: number; misses: number; haversineCalls: number } {
+  return stats;
+}
+
 function loadCache(): Cache {
   if (cache) return cache;
   if (existsSync(CACHE_PATH)) {
@@ -86,13 +95,20 @@ export async function getEdgeWeight(
   a: Supercharger,
   b: Supercharger,
 ): Promise<EdgeWeight> {
-  if (useHaversine()) return haversineEdge(a, b);
+  if (useHaversine()) {
+    stats.haversineCalls++;
+    return haversineEdge(a, b);
+  }
 
   const c = loadCache();
   const key = cacheKey(a.id, b.id);
   const hit = c[key];
-  if (hit) return hit;
+  if (hit) {
+    stats.hits++;
+    return hit;
+  }
 
+  stats.misses++;
   const weight = await distanceMatrixEdge(a, b);
   c[key] = weight;
   dirty = true;
