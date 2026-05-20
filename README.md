@@ -179,43 +179,6 @@ Returns a map of charger id → up to 6 nearby restaurants (name, formatted addr
 
 Returns service status.
 
-## Engineering decisions worth surfacing
-
-These are choices I'd defend in an interview, not just defaults:
-
-- **Charge-to-need over battery-buckets.** Bucketing battery in the state
-  space (a common textbook approach) explodes the graph by ~20×. Folding
-  charging into the edge cost keeps state finite and the algorithm
-  understandable. Real-world taper above 80% is acknowledged and parked
-  for a later refinement.
-- **State-augmented A\* only when `maxStops` is set.** Always tracking
-  stop count makes the unconstrained planner ~2× slower for no benefit.
-  The conditional encoding fell out of the 96 s → 835 ms regression and
-  is documented as a hot path.
-- **Corridor prefilter at 1.4× before any other work.** Tighter ratios
-  occasionally cut a charger that lies on the optimal path; 1.4× was the
-  smallest factor I tested that didn't change any benchmark route's
-  output vs the unfiltered baseline.
-- **Brand filter runs server-side, not client-iteration.** An earlier
-  version of the client iteratively excluded off-brand chargers and
-  replanned. It stalled in suburban clusters around the start (e.g. the
-  Bay Area has many chargers near office parks without In-N-Out). The
-  server now identifies the brand-eligible candidate set up front and
-  runs A\* once.
-- **Two-level Google API key separation.** The client uses a referrer-
-  restricted key for the Maps JS SDK and Places Autocomplete (those have
-  to run in the browser). The server uses an IP-restricted key for
-  Places REST and Distance Matrix, keeping those calls server-side and
-  cacheable.
-- **JSON file cache instead of Redis/DynamoDB for local dev.** Same shape
-  as a future DynamoDB cache (key → JSON value, batchable). The
-  promotion path is a `getEdgeWeight` swap, not a rewrite.
-
-## Roadmap
-
-- **Phase 4 — AWS deploy.** Lambda + API Gateway, DynamoDB edge cache, `USE_HAVERSINE_EDGES=false` for real driving times.
-- **Post-internship v2 — SaaS.** Auth + persistent favorites + saved trips. Most likely a switch from DynamoDB to Postgres for the user data.
-
 ## License
 
 MIT
