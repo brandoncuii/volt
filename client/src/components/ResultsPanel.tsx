@@ -25,7 +25,7 @@ import {
   restaurantMatchesAnyBrand,
   chargerSatisfiesBrands,
   type Brand,
-} from '@/lib/brands';
+} from '@volt/shared';
 import { cn } from '@/lib/utils';
 
 interface Props {

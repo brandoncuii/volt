@@ -4,11 +4,20 @@ import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '@/components/ui/select';
 import { PlacesAutocompleteInput } from '@/components/PlacesAutocompleteInput';
 import { BrandFilter } from '@/components/BrandFilter';
 import type { PlaceValue } from '@/lib/maps';
 import { miToKm } from '@/lib/units';
-import type { Brand } from '@/lib/brands';
+import type { Brand } from '@volt/shared';
+
+const MAX_STOPS_ANY = 'any';
 
 interface Props {
   onSubmit: (req: RouteRequest) => void;
@@ -28,18 +37,22 @@ export function RouteForm({
   const [vehicleRangeMi, setVehicleRangeMi] = useState(250);
   const [startBatteryPct, setStartBatteryPct] = useState(90);
   const [minArrivalBatteryPct, setMinArrivalBatteryPct] = useState(10);
+  const [maxStops, setMaxStops] = useState<string>(MAX_STOPS_ANY);
 
   const canSubmit = start !== null && end !== null && !loading;
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!start || !end) return;
+    const parsedMaxStops =
+      maxStops === MAX_STOPS_ANY ? undefined : Number(maxStops);
     onSubmit({
       start: { lat: start.lat, lng: start.lng },
       end: { lat: end.lat, lng: end.lng },
       vehicleRangeKm: miToKm(vehicleRangeMi),
       startBatteryPct,
       minArrivalBatteryPct,
+      ...(parsedMaxStops !== undefined && { maxStops: parsedMaxStops }),
     });
   };
 
@@ -112,6 +125,22 @@ export function RouteForm({
               value={[minArrivalBatteryPct]}
               onValueChange={([v]) => setMinArrivalBatteryPct(v!)}
             />
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="max-stops">Max stops</Label>
+            <Select value={maxStops} onValueChange={setMaxStops}>
+              <SelectTrigger id="max-stops" className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={MAX_STOPS_ANY}>Any</SelectItem>
+                <SelectItem value="1">1</SelectItem>
+                <SelectItem value="2">2</SelectItem>
+                <SelectItem value="3">3</SelectItem>
+                <SelectItem value="4">4</SelectItem>
+              </SelectContent>
+            </Select>
           </div>
 
           <BrandFilter

@@ -20,7 +20,9 @@ export interface RouteRequest {
   vehicleRangeKm: number;        // max range on full charge, e.g. 400
   startBatteryPct: number;       // 0-100, e.g. 90
   minArrivalBatteryPct: number;  // 0-100, e.g. 10 — must arrive with at least this much
-  excludeChargerIds?: string[];  // chargers to exclude from the graph (used by brand filter)
+  excludeChargerIds?: string[];   // chargers to exclude from the graph
+  maxStops?: number;              // cap on the number of charging stops in the result (0-10)
+  restaurantBrandIds?: string[];  // when set, server pre-filters chargers to those near these brands
 }
 
 // One stop along the computed route

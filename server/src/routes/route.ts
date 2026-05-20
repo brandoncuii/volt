@@ -1,7 +1,13 @@
 import { Router, Request, Response } from 'express';
 import type { RouteRequest, ApiError } from '@volt/shared';
+import { findBrand } from '@volt/shared';
 import { loadSuperchargers } from '../data/loader.js';
 import { planRoute } from '../algo/aStar.js';
+import { chargersInCorridor } from '../graph/corridor.js';
+import {
+  filterChargersByBrand,
+  flushPlacesCache,
+} from '../places/placesClient.js';
 
 export const routeRouter = Router();
 
@@ -42,6 +48,30 @@ function validate(body: unknown): RouteRequest | string {
     excludeChargerIds = b.excludeChargerIds;
   }
 
+  let maxStops: number | undefined;
+  if (b.maxStops !== undefined) {
+    if (
+      typeof b.maxStops !== 'number' ||
+      !Number.isInteger(b.maxStops) ||
+      b.maxStops < 0 ||
+      b.maxStops > 10
+    ) {
+      return 'maxStops must be an integer between 0 and 10';
+    }
+    maxStops = b.maxStops;
+  }
+
+  let restaurantBrandIds: string[] | undefined;
+  if (b.restaurantBrandIds !== undefined) {
+    if (
+      !Array.isArray(b.restaurantBrandIds) ||
+      !b.restaurantBrandIds.every((id): id is string => typeof id === 'string')
+    ) {
+      return 'restaurantBrandIds must be an array of strings';
+    }
+    restaurantBrandIds = b.restaurantBrandIds;
+  }
+
   return {
     start: b.start,
     end: b.end,
@@ -49,6 +79,8 @@ function validate(body: unknown): RouteRequest | string {
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
+    ...(maxStops !== undefined && { maxStops }),
+    ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
   };
 }
 
@@ -62,9 +94,23 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
   try {
     const all = loadSuperchargers();
     const excluded = new Set(parsed.excludeChargerIds ?? []);
-    const chargers = excluded.size === 0
+    let chargers = excluded.size === 0
       ? all
       : all.filter((c) => !excluded.has(c.id));
+
+    // Server-side brand pre-filter: bound by an ellipse corridor so we only
+    // hit the Places API for chargers actually relevant to this trip.
+    if (parsed.restaurantBrandIds && parsed.restaurantBrandIds.length > 0) {
+      const brands = parsed.restaurantBrandIds
+        .map((id) => findBrand(id))
+        .filter((b): b is NonNullable<typeof b> => b !== undefined);
+      if (brands.length > 0) {
+        const corridor = chargersInCorridor(chargers, parsed.start, parsed.end);
+        chargers = await filterChargersByBrand(corridor, brands);
+        flushPlacesCache();
+      }
+    }
+
     const result = await planRoute(chargers, parsed);
     return res.json(result);
   } catch (e) {

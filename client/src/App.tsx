@@ -1,5 +1,10 @@
 import { useState } from 'react';
-import type { RouteRequest, RouteResponse, PlacesResponse } from '@volt/shared';
+import type {
+  RouteRequest,
+  RouteResponse,
+  PlacesResponse,
+  Brand,
+} from '@volt/shared';
 import { fetchRoute, fetchPlaces } from '@/lib/api';
 import { useGoogleMaps } from '@/lib/maps';
 import { RouteForm } from '@/components/RouteForm';
@@ -9,9 +14,6 @@ import { Toaster } from '@/components/ui/sonner';
 import { Skeleton } from '@/components/ui/skeleton';
 import { toast } from 'sonner';
 import { Zap } from 'lucide-react';
-import { chargerSatisfiesBrands, type Brand } from '@/lib/brands';
-
-const MAX_BRAND_REPLAN_ITERATIONS = 3;
 
 function App() {
   const { isLoaded, loadError } = useGoogleMaps();
@@ -33,50 +35,44 @@ function App() {
     setPartialFit(false);
     setEndpoints({ start: req.start, end: req.end });
 
-    const excluded = new Set<string>(req.excludeChargerIds ?? []);
-    let route: RouteResponse | null = null;
-    let places: PlacesResponse | null = null;
+    const reqWithBrands: RouteRequest = {
+      ...req,
+      ...(selectedBrands.length > 0 && {
+        restaurantBrandIds: selectedBrands.map((b) => b.id),
+      }),
+    };
 
     try {
-      for (let i = 0; i < MAX_BRAND_REPLAN_ITERATIONS; i++) {
-        route = await fetchRoute({
-          ...req,
-          excludeChargerIds: [...excluded],
-        });
-        setResult(route);
-
-        if (route.stops.length === 0) {
-          places = {};
-          setRestaurants({});
-          break;
+      let route: RouteResponse;
+      try {
+        route = await fetchRoute(reqWithBrands);
+      } catch (e) {
+        // If the brand filter made the trip infeasible, fall back to a plain
+        // route and let the user see what was closest.
+        if (selectedBrands.length > 0) {
+          route = await fetchRoute(req);
+          setPartialFit(true);
+        } else {
+          throw e;
         }
+      }
+      setResult(route);
 
+      if (route.stops.length > 0) {
         setRestaurantsLoading(true);
         try {
-          places = await fetchPlaces(route.stops.map((s) => s.charger.id));
+          const places = await fetchPlaces(
+            route.stops.map((s) => s.charger.id),
+          );
           setRestaurants(places);
         } catch (e) {
           const msg = e instanceof Error ? e.message : 'Places lookup failed';
           toast.warning('Could not load restaurants', { description: msg });
-          places = {};
         } finally {
           setRestaurantsLoading(false);
         }
-
-        if (selectedBrands.length === 0) break;
-
-        const offBrand = route.stops
-          .map((s) => s.charger.id)
-          .filter((id) => !chargerSatisfiesBrands(places?.[id], selectedBrands));
-
-        if (offBrand.length === 0) break; // every stop matches a brand
-
-        if (i === MAX_BRAND_REPLAN_ITERATIONS - 1) {
-          setPartialFit(true);
-          break;
-        }
-
-        for (const id of offBrand) excluded.add(id);
+      } else {
+        setRestaurants({});
       }
     } catch (e) {
       const msg = e instanceof Error ? e.message : 'Route failed';
@@ -114,8 +110,8 @@ function App() {
           )}
           {partialFit && (
             <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 text-yellow-900 px-3 py-2 text-xs">
-              Couldn't satisfy every brand filter without breaking the route.
-              Showing the closest match.
+              Couldn't find a route through your selected brands. Showing the
+              closest match without the brand filter.
             </div>
           )}
           {result && (

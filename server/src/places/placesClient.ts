@@ -1,7 +1,13 @@
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import type { Restaurant, PriceLevel } from '@volt/shared';
+import {
+  chargerSatisfiesBrands,
+  type Restaurant,
+  type PriceLevel,
+  type Supercharger,
+  type Brand,
+} from '@volt/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const CACHE_PATH = join(__dirname, '..', 'data', 'places-cache.json');
@@ -105,4 +111,25 @@ export async function getRestaurantsForCharger(
   c[chargerId] = restaurants;
   dirty = true;
   return restaurants;
+}
+
+// Parallel fetch + brand match; lookups failing for one charger don't drop
+// the whole batch. Used by the route handler when the user has brand
+// filters active.
+export async function filterChargersByBrand(
+  chargers: Supercharger[],
+  brands: Brand[],
+): Promise<Supercharger[]> {
+  if (brands.length === 0) return chargers;
+  const results = await Promise.all(
+    chargers.map(async (c) => {
+      try {
+        const places = await getRestaurantsForCharger(c.id, c.location);
+        return chargerSatisfiesBrands(places, brands) ? c : null;
+      } catch {
+        return null;
+      }
+    }),
+  );
+  return results.filter((c): c is Supercharger => c !== null);
 }

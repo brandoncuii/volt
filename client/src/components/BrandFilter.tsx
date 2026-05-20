@@ -1,4 +1,4 @@
-import { BRANDS, type Brand } from '@/lib/brands';
+import { BRANDS, type Brand } from '@volt/shared';
 import { Label } from '@/components/ui/label';
 import { cn } from '@/lib/utils';
 

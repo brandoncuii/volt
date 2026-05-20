@@ -20,12 +20,25 @@ const START_ID = '__start__';
 const END_ID = '__end__';
 
 interface EdgeRecord {
-  prevId: string;
+  prevKey: string;
   distanceKm: number;
   drivingTimeMin: number;
   arrivalBatteryPct: number;
   chargingTimeAtPrevMin: number;
   departureBatteryFromPrevPct: number;
+}
+
+// State key encodes both the node id and how many charger stops the path
+// taking us here has visited so far. Different stopCounts for the same
+// charger are distinct states — necessary when `maxStops` is active, since
+// the time-optimal path to X may not respect the cap.
+function makeKey(id: string, stopCount: number): string {
+  return `${id}#${stopCount}`;
+}
+
+function parseKey(key: string): { id: string; stopCount: number } {
+  const idx = key.lastIndexOf('#');
+  return { id: key.slice(0, idx), stopCount: Number(key.slice(idx + 1)) };
 }
 
 export async function planRoute(
@@ -35,6 +48,7 @@ export async function planRoute(
   const maxRangeKm = req.vehicleRangeKm;
   const batteryCapacityKWh = maxRangeKm * EFFICIENCY_KWH_PER_KM;
   const prefilterKm = maxRangeKm * RANGE_PREFILTER_FACTOR;
+  const maxStops = req.maxStops;
 
   const startNode: Supercharger = {
     id: START_ID,
@@ -78,34 +92,43 @@ export async function planRoute(
   const arrivalBattery = new Map<string, number>();
   const edgeIn = new Map<string, EdgeRecord>();
 
-  heap.push(START_ID, 0);
-  gScore.set(START_ID, 0);
-  arrivalBattery.set(START_ID, req.startBatteryPct);
+  const startKey = makeKey(START_ID, 0);
+  heap.push(startKey, 0);
+  gScore.set(startKey, 0);
+  arrivalBattery.set(startKey, req.startBatteryPct);
 
   const visited = new Set<string>();
 
   while (heap.size > 0) {
-    const currentId = heap.pop()!;
-    if (visited.has(currentId)) continue;
-    visited.add(currentId);
+    const currentKey = heap.pop()!;
+    if (visited.has(currentKey)) continue;
+    visited.add(currentKey);
+
+    const { id: currentId, stopCount: currentStopCount } = parseKey(currentKey);
 
     if (currentId === END_ID) {
       flushEdgeCache();
-      return reconstruct(edgeIn, byId, gScore.get(END_ID)!);
+      return reconstruct(edgeIn, byId, gScore.get(currentKey)!, currentKey);
     }
 
     const current = byId.get(currentId)!;
-    const currentG = gScore.get(currentId)!;
-    const currentBattery = arrivalBattery.get(currentId)!;
+    const currentG = gScore.get(currentKey)!;
+    const currentBattery = arrivalBattery.get(currentKey)!;
 
     for (const nb of neighbors(current)) {
+      const isEnd = nb.id === END_ID;
+      const newStopCount = isEnd ? currentStopCount : currentStopCount + 1;
+
+      if (!isEnd && maxStops !== undefined && newStopCount > maxStops) continue;
+
       const edge = await getEdgeWeight(current, nb);
 
       const energyPct = (edge.distanceKm / maxRangeKm) * 100;
       if (energyPct >= 100) continue;
 
-      const requiredArrival =
-        nb.id === END_ID ? req.minArrivalBatteryPct : SAFETY_BUFFER_PCT;
+      const requiredArrival = isEnd
+        ? req.minArrivalBatteryPct
+        : SAFETY_BUFFER_PCT;
       const requiredDeparture = requiredArrival + energyPct;
       if (requiredDeparture > 100) continue;
 
@@ -122,13 +145,14 @@ export async function planRoute(
       const arrival = departureBattery - energyPct;
       const tentativeG = currentG + chargingTimeMin + edge.drivingTimeMin;
 
-      const prevG = gScore.get(nb.id);
+      const nbKey = makeKey(nb.id, newStopCount);
+      const prevG = gScore.get(nbKey);
       if (prevG !== undefined && tentativeG >= prevG) continue;
 
-      gScore.set(nb.id, tentativeG);
-      arrivalBattery.set(nb.id, arrival);
-      edgeIn.set(nb.id, {
-        prevId: currentId,
+      gScore.set(nbKey, tentativeG);
+      arrivalBattery.set(nbKey, arrival);
+      edgeIn.set(nbKey, {
+        prevKey: currentKey,
         distanceKm: edge.distanceKm,
         drivingTimeMin: edge.drivingTimeMin,
         arrivalBatteryPct: arrival,
@@ -138,11 +162,14 @@ export async function planRoute(
 
       const h =
         (haversineKm(nb.location, endNode.location) / AVG_SPEED_KMH) * 60;
-      heap.push(nb.id, tentativeG + h);
+      heap.push(nbKey, tentativeG + h);
     }
   }
 
   flushEdgeCache();
+  if (maxStops !== undefined) {
+    throw new Error(`No feasible route found within ${maxStops} stops`);
+  }
   throw new Error('No feasible route found');
 }
 
@@ -150,16 +177,17 @@ function reconstruct(
   edgeIn: Map<string, EdgeRecord>,
   byId: Map<string, Supercharger>,
   totalTripTimeMin: number,
+  endKey: string,
 ): RouteResponse {
-  // Walk back from end to start, collecting the node sequence.
+  // Walk back from end to start, collecting state keys.
   const path: string[] = [];
-  let cur: string | undefined = END_ID;
+  let cur: string | undefined = endKey;
   while (cur !== undefined) {
     path.push(cur);
-    cur = edgeIn.get(cur)?.prevId;
+    cur = edgeIn.get(cur)?.prevKey;
   }
   path.reverse();
-  // path: [START_ID, ...chargers, END_ID]
+  // path: [start state key, ...charger state keys, end state key]
 
   let totalDistanceKm = 0;
   let totalDrivingTimeMin = 0;
@@ -167,17 +195,18 @@ function reconstruct(
   const stops: RouteStop[] = [];
 
   for (let i = 1; i < path.length; i++) {
-    const nodeId = path[i]!;
-    const rec = edgeIn.get(nodeId)!;
+    const nodeKey = path[i]!;
+    const rec = edgeIn.get(nodeKey)!;
     totalDistanceKm += rec.distanceKm;
     totalDrivingTimeMin += rec.drivingTimeMin;
 
-    // We emit a stop for the *previous* node (which is the one being charged at)
-    // unless prev is the virtual start.
-    const prevId = rec.prevId;
+    // Emit a stop for the *previous* node (the one we charged at) unless
+    // prev is the virtual start.
+    const prevKey = rec.prevKey;
+    const { id: prevId } = parseKey(prevKey);
     if (prevId !== START_ID) {
       const prevCharger = byId.get(prevId)!;
-      const prevArrival = edgeIn.get(prevId)!;
+      const prevArrival = edgeIn.get(prevKey)!;
       stops.push({
         charger: prevCharger,
         arrivalBatteryPct: round(prevArrival.arrivalBatteryPct),

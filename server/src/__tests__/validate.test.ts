@@ -45,6 +45,30 @@ function validate(body: unknown): RouteRequest | string {
     excludeChargerIds = b.excludeChargerIds;
   }
 
+  let maxStops: number | undefined;
+  if (b.maxStops !== undefined) {
+    if (
+      typeof b.maxStops !== 'number' ||
+      !Number.isInteger(b.maxStops) ||
+      b.maxStops < 0 ||
+      b.maxStops > 10
+    ) {
+      return 'maxStops must be an integer between 0 and 10';
+    }
+    maxStops = b.maxStops;
+  }
+
+  let restaurantBrandIds: string[] | undefined;
+  if (b.restaurantBrandIds !== undefined) {
+    if (
+      !Array.isArray(b.restaurantBrandIds) ||
+      !b.restaurantBrandIds.every((id): id is string => typeof id === 'string')
+    ) {
+      return 'restaurantBrandIds must be an array of strings';
+    }
+    restaurantBrandIds = b.restaurantBrandIds;
+  }
+
   return {
     start: b.start,
     end: b.end,
@@ -52,6 +76,8 @@ function validate(body: unknown): RouteRequest | string {
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
+    ...(maxStops !== undefined && { maxStops }),
+    ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
   };
 }
 
@@ -150,5 +176,61 @@ describe('validate', () => {
   it('omits excludeChargerIds when not provided', () => {
     const result = validate(validBody);
     expect((result as RouteRequest).excludeChargerIds).toBeUndefined();
+  });
+
+  it('accepts a valid maxStops value', () => {
+    const body = { ...validBody, maxStops: 3 };
+    const result = validate(body);
+    expect((result as RouteRequest).maxStops).toBe(3);
+  });
+
+  it('accepts maxStops=0', () => {
+    const body = { ...validBody, maxStops: 0 };
+    const result = validate(body);
+    expect((result as RouteRequest).maxStops).toBe(0);
+  });
+
+  it('rejects negative maxStops', () => {
+    const body = { ...validBody, maxStops: -1 };
+    expect(validate(body)).toBe('maxStops must be an integer between 0 and 10');
+  });
+
+  it('rejects non-integer maxStops', () => {
+    const body = { ...validBody, maxStops: 2.5 };
+    expect(validate(body)).toBe('maxStops must be an integer between 0 and 10');
+  });
+
+  it('rejects maxStops above the cap', () => {
+    const body = { ...validBody, maxStops: 11 };
+    expect(validate(body)).toBe('maxStops must be an integer between 0 and 10');
+  });
+
+  it('omits maxStops when not provided', () => {
+    const result = validate(validBody);
+    expect((result as RouteRequest).maxStops).toBeUndefined();
+  });
+
+  it('accepts restaurantBrandIds as an array of strings', () => {
+    const body = { ...validBody, restaurantBrandIds: ['in-n-out', 'chipotle'] };
+    const result = validate(body);
+    expect((result as RouteRequest).restaurantBrandIds).toEqual([
+      'in-n-out',
+      'chipotle',
+    ]);
+  });
+
+  it('rejects non-array restaurantBrandIds', () => {
+    const body = { ...validBody, restaurantBrandIds: 'in-n-out' };
+    expect(validate(body)).toBe('restaurantBrandIds must be an array of strings');
+  });
+
+  it('rejects restaurantBrandIds with non-string entries', () => {
+    const body = { ...validBody, restaurantBrandIds: ['in-n-out', 42] };
+    expect(validate(body)).toBe('restaurantBrandIds must be an array of strings');
+  });
+
+  it('omits restaurantBrandIds when not provided', () => {
+    const result = validate(validBody);
+    expect((result as RouteRequest).restaurantBrandIds).toBeUndefined();
   });
 });

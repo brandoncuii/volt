@@ -98,4 +98,56 @@ describe('planRoute', () => {
     // This is a loose check — just ensure we don't arrive empty
     expect(result.totalDistanceKm).toBeGreaterThan(0);
   });
+
+  it('respects maxStops cap when feasible', async () => {
+    const req: RouteRequest = {
+      start: { lat: 34.0522, lng: -118.2437 }, // LA
+      end: { lat: 37.7749, lng: -122.4194 },   // SF
+      vehicleRangeKm: 600, // generous so 1 stop is feasible
+      startBatteryPct: 100,
+      minArrivalBatteryPct: 10,
+      maxStops: 1,
+    };
+    const result = await planRoute(chargers, req);
+    expect(result.stops.length).toBeLessThanOrEqual(1);
+  });
+
+  it('throws when maxStops makes the route infeasible', async () => {
+    const req: RouteRequest = {
+      start: { lat: 34.0522, lng: -118.2437 },
+      end: { lat: 37.7749, lng: -122.4194 },
+      vehicleRangeKm: 250, // short enough that 0 stops is impossible
+      startBatteryPct: 100,
+      minArrivalBatteryPct: 10,
+      maxStops: 0,
+    };
+    await expect(planRoute(chargers, req)).rejects.toThrow('within 0 stops');
+  });
+
+  it('allows direct route when maxStops=0 and destination is in range', async () => {
+    const req: RouteRequest = {
+      start: { lat: 34.0522, lng: -118.2437 },
+      end: { lat: 34.15, lng: -118.35 }, // very close
+      vehicleRangeKm: 400,
+      startBatteryPct: 80,
+      minArrivalBatteryPct: 10,
+      maxStops: 0,
+    };
+    const result = await planRoute(chargers, req);
+    expect(result.stops).toHaveLength(0);
+  });
+
+  it('higher maxStops allows tighter range', async () => {
+    const tightRange: RouteRequest = {
+      start: { lat: 34.0522, lng: -118.2437 },
+      end: { lat: 37.7749, lng: -122.4194 },
+      vehicleRangeKm: 300,
+      startBatteryPct: 100,
+      minArrivalBatteryPct: 10,
+      maxStops: 3,
+    };
+    const result = await planRoute(chargers, tightRange);
+    expect(result.stops.length).toBeGreaterThan(0);
+    expect(result.stops.length).toBeLessThanOrEqual(3);
+  });
 });

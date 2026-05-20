@@ -1,4 +1,4 @@
-import type { Restaurant } from '@volt/shared';
+import type { Restaurant } from './types';
 
 export interface Brand {
   id: string;
@@ -20,6 +20,10 @@ export const BRANDS: Brand[] = [
   { id: 'panera', name: 'Panera', pattern: /panera/i },
   { id: 'subway', name: 'Subway', pattern: /\bsubway\b/i },
 ];
+
+export function findBrand(id: string): Brand | undefined {
+  return BRANDS.find((b) => b.id === id);
+}
 
 export function restaurantMatchesAnyBrand(
   restaurant: Restaurant,
