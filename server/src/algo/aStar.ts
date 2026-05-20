@@ -49,6 +49,7 @@ export async function planRoute(
   const batteryCapacityKWh = maxRangeKm * EFFICIENCY_KWH_PER_KM;
   const prefilterKm = maxRangeKm * RANGE_PREFILTER_FACTOR;
   const maxStops = req.maxStops;
+  const trackStops = maxStops !== undefined;
 
   const startNode: Supercharger = {
     id: START_ID,
@@ -117,9 +118,11 @@ export async function planRoute(
 
     for (const nb of neighbors(current)) {
       const isEnd = nb.id === END_ID;
-      const newStopCount = isEnd ? currentStopCount : currentStopCount + 1;
+      const newStopCount = trackStops
+        ? (isEnd ? currentStopCount : currentStopCount + 1)
+        : 0;
 
-      if (!isEnd && maxStops !== undefined && newStopCount > maxStops) continue;
+      if (trackStops && !isEnd && newStopCount > maxStops) continue;
 
       const edge = await getEdgeWeight(current, nb);
 
