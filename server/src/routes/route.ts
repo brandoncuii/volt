@@ -98,6 +98,10 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
       ? all
       : all.filter((c) => !excluded.has(c.id));
 
+    // Spatial pre-filter: only consider chargers roughly between start and
+    // end.  Uses a generous 1.4× ellipse so winding roads are covered.
+    chargers = chargersInCorridor(chargers, parsed.start, parsed.end, 1.4);
+
     // Server-side brand pre-filter: bound by an ellipse corridor so we only
     // hit the Places API for chargers actually relevant to this trip.
     if (parsed.restaurantBrandIds && parsed.restaurantBrandIds.length > 0) {
