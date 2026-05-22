@@ -5,8 +5,12 @@ import type {
   ApiError,
 } from '@volt/shared';
 
+// Empty string in dev → Vite proxy forwards relative /api/* to the local
+// server. Set to the AWS API Gateway URL in Vercel for production.
+const API_BASE = import.meta.env.VITE_API_URL ?? '';
+
 async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(path, {
+  const res = await fetch(`${API_BASE}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body),

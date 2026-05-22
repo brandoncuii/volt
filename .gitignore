@@ -18,7 +18,9 @@ CONTEXT.md
 # AWS/serverless
 .serverless/
 .aws-sam/
+infra/cdk.out/
 
 # Runtime caches (populated on demand by the server)
 server/src/data/places-cache.json
 server/src/data/edge-cache.json
+.vercel

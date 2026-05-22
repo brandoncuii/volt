@@ -10,7 +10,11 @@ import {
 } from '@volt/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const CACHE_PATH = join(__dirname, '..', 'data', 'places-cache.json');
+// Lambda's /var/task (where bundles live) is read-only. /tmp is writable
+// and persists across warm invocations on the same container.
+const CACHE_PATH = process.env.AWS_LAMBDA_FUNCTION_NAME
+  ? '/tmp/places-cache.json'
+  : join(__dirname, '..', 'data', 'places-cache.json');
 
 const SEARCH_RADIUS_METERS = 800; // ~10 min walk while charging
 const MAX_RESULTS = 6;

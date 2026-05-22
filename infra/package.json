@@ -1,0 +1,23 @@
+{
+  "name": "infra",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "volt": "bin/volt.js"
+  },
+  "scripts": {
+    "synth": "cdk synth",
+    "diff": "cdk diff",
+    "deploy": "cdk deploy",
+    "destroy": "cdk destroy"
+  },
+  "devDependencies": {
+    "@types/node": "^25.9.0",
+    "aws-cdk": "^2.170.0",
+    "aws-cdk-lib": "^2.170.0",
+    "constructs": "^10.4.2",
+    "tsx": "^4.22.2",
+    "typescript": "^6.0.3"
+  }
+}

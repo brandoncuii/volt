@@ -2,6 +2,11 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Supercharger } from '@volt/shared';
+import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+} from '@aws-sdk/client-dynamodb';
 import { haversineKm } from './haversine.js';
 
 export interface EdgeWeight {
@@ -19,6 +24,17 @@ const AVG_SPEED_KMH = 88;
 
 const useHaversine = (): boolean =>
   process.env.USE_HAVERSINE_EDGES !== 'false';
+
+// In Lambda the JSON file cache won't persist between invocations, so the
+// CDK stack injects EDGE_CACHE_TABLE pointing at a DynamoDB table. Unset
+// locally → fall back to the file cache.
+const ddbTableName = (): string | undefined => process.env.EDGE_CACHE_TABLE;
+
+let ddbClient: DynamoDBClient | null = null;
+function getDdb(): DynamoDBClient {
+  if (!ddbClient) ddbClient = new DynamoDBClient({});
+  return ddbClient;
+}
 
 type Cache = Record<string, EdgeWeight>;
 let cache: Cache | null = null;
@@ -91,6 +107,33 @@ async function distanceMatrixEdge(
   };
 }
 
+async function ddbGet(key: string): Promise<EdgeWeight | null> {
+  const result = await getDdb().send(
+    new GetItemCommand({
+      TableName: ddbTableName(),
+      Key: { pk: { S: key } },
+    }),
+  );
+  if (!result.Item) return null;
+  return {
+    distanceKm: Number(result.Item.distanceKm?.N ?? '0'),
+    drivingTimeMin: Number(result.Item.drivingTimeMin?.N ?? '0'),
+  };
+}
+
+async function ddbPut(key: string, w: EdgeWeight): Promise<void> {
+  await getDdb().send(
+    new PutItemCommand({
+      TableName: ddbTableName(),
+      Item: {
+        pk: { S: key },
+        distanceKm: { N: String(w.distanceKm) },
+        drivingTimeMin: { N: String(w.drivingTimeMin) },
+      },
+    }),
+  );
+}
+
 export async function getEdgeWeight(
   a: Supercharger,
   b: Supercharger,
@@ -100,8 +143,21 @@ export async function getEdgeWeight(
     return haversineEdge(a, b);
   }
 
-  const c = loadCache();
   const key = cacheKey(a.id, b.id);
+
+  if (ddbTableName()) {
+    const hit = await ddbGet(key);
+    if (hit) {
+      stats.hits++;
+      return hit;
+    }
+    stats.misses++;
+    const weight = await distanceMatrixEdge(a, b);
+    await ddbPut(key, weight);
+    return weight;
+  }
+
+  const c = loadCache();
   const hit = c[key];
   if (hit) {
     stats.hits++;
