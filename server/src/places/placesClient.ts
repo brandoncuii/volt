@@ -2,6 +2,11 @@ import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import {
+  DynamoDBClient,
+  GetItemCommand,
+  PutItemCommand,
+} from '@aws-sdk/client-dynamodb';
+import {
   chargerSatisfiesBrands,
   type Restaurant,
   type PriceLevel,
@@ -10,8 +15,6 @@ import {
 } from '@volt/shared';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-// Lambda's /var/task (where bundles live) is read-only. /tmp is writable
-// and persists across warm invocations on the same container.
 const CACHE_PATH = process.env.AWS_LAMBDA_FUNCTION_NAME
   ? '/tmp/places-cache.json'
   : join(__dirname, '..', 'data', 'places-cache.json');
@@ -27,6 +30,17 @@ const FIELD_MASK = [
   'places.userRatingCount',
   'places.priceLevel',
 ].join(',');
+
+// DynamoDB table for persistent places cache (Lambda). Locally we still
+// use the JSON file. The CDK stack injects this env var.
+const ddbTableName = (): string | undefined =>
+  process.env.PLACES_CACHE_TABLE;
+
+let ddbClient: DynamoDBClient | null = null;
+function getDdb(): DynamoDBClient {
+  if (!ddbClient) ddbClient = new DynamoDBClient({});
+  return ddbClient;
+}
 
 type Cache = Record<string, Restaurant[]>;
 let cache: Cache | null = null;
@@ -50,7 +64,11 @@ function loadCache(): Cache {
 
 export function flushPlacesCache(): void {
   if (!dirty || !cache) return;
-  writeFileSync(CACHE_PATH, JSON.stringify(cache));
+  // In Lambda with DynamoDB, writes happen inline (ddbPut) so we only
+  // need to flush the JSON file when running locally.
+  if (!ddbTableName()) {
+    writeFileSync(CACHE_PATH, JSON.stringify(cache));
+  }
   dirty = false;
 }
 
@@ -111,21 +129,63 @@ async function fetchRestaurantsFromGoogle(location: {
     }));
 }
 
+async function ddbGet(chargerId: string): Promise<Restaurant[] | null> {
+  const result = await getDdb().send(
+    new GetItemCommand({
+      TableName: ddbTableName(),
+      Key: { pk: { S: `places#${chargerId}` } },
+    }),
+  );
+  if (!result.Item?.data?.S) return null;
+  return JSON.parse(result.Item.data.S) as Restaurant[];
+}
+
+async function ddbPut(
+  chargerId: string,
+  restaurants: Restaurant[],
+): Promise<void> {
+  await getDdb().send(
+    new PutItemCommand({
+      TableName: ddbTableName(),
+      Item: {
+        pk: { S: `places#${chargerId}` },
+        data: { S: JSON.stringify(restaurants) },
+      },
+    }),
+  );
+}
+
 export async function getRestaurantsForCharger(
   chargerId: string,
   location: { lat: number; lng: number },
 ): Promise<Restaurant[]> {
+  // In-memory cache (warm Lambda or long-running local server)
   const c = loadCache();
-  const hit = c[chargerId];
-  if (hit) {
+  const memHit = c[chargerId];
+  if (memHit) {
     stats.hits++;
-    return hit;
+    return memHit;
+  }
+
+  // DynamoDB cache (persists across Lambda cold starts)
+  if (ddbTableName()) {
+    const ddbHit = await ddbGet(chargerId);
+    if (ddbHit) {
+      stats.hits++;
+      c[chargerId] = ddbHit;
+      return ddbHit;
+    }
   }
 
   stats.misses++;
   const restaurants = await fetchRestaurantsFromGoogle(location);
   c[chargerId] = restaurants;
   dirty = true;
+
+  if (ddbTableName()) {
+    await ddbPut(chargerId, restaurants);
+  }
+
   return restaurants;
 }
 

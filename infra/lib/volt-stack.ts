@@ -24,6 +24,16 @@ export class VoltStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY, // ok for v1; switch to RETAIN before any real traffic
     });
 
+    // Places cache. Restaurant data for each charger is fetched from the
+    // Google Places API and rarely changes. Persisting it in DynamoDB
+    // avoids re-fetching on every Lambda cold start — the main driver of
+    // unexpectedly high Places API bills.
+    const placesCache = new Table(this, 'PlacesCache', {
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!googleMapsApiKey) {
       throw new Error(
@@ -63,6 +73,7 @@ export class VoltStack extends Stack {
       },
       environment: {
         EDGE_CACHE_TABLE: edgeCache.tableName,
+        PLACES_CACHE_TABLE: placesCache.tableName,
         GOOGLE_MAPS_API_KEY: googleMapsApiKey,
         // Stay on Haversine in prod for v1: the Distance Matrix path needs
         // a pre-warmed cache to be feasible inside Lambda's response budget.
@@ -73,6 +84,7 @@ export class VoltStack extends Stack {
     });
 
     edgeCache.grantReadWriteData(api);
+    placesCache.grantReadWriteData(api);
 
     const httpApi = new HttpApi(this, 'VoltHttpApi', {
       corsPreflight: {
