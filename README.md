@@ -33,9 +33,12 @@ flowchart LR
 
 | Layer | What's in it |
 |---|---|
-| `client/` | React 19 + TS + Vite + Tailwind v4 + shadcn/ui (Nova). Route form, map (`@react-google-maps/api`), Places autocomplete, results panel with per-stop restaurants |
-| `server/` | Express 5 (ESM) + TS. Routing engine, places proxy, JSON-file caches for edge weights and restaurants. Rate-limited at 30 req/min/IP |
+| `client/` | React 19 + TS + Vite + Tailwind v4 + shadcn/ui (Nova). Route form, map (`@react-google-maps/api`), Places autocomplete, results panel with per-stop restaurants. Deploys to Vercel |
+| `server/` | Express 5 (ESM) + TS. Routing engine, places proxy. Runs locally as `tsx watch` and in production as an AWS Lambda (via `serverless-http`) behind API Gateway. Rate-limited at 30 req/min/IP |
 | `shared/` | `@volt/shared` workspace — wire types (`RouteRequest`, `RouteResponse`, `Restaurant`, `Brand`) used by both sides |
+| `infra/` | AWS CDK app (`VoltStack`) — provisions the Lambda, API Gateway HTTP API, and two DynamoDB tables (edge-weight cache + places cache with TTL) |
+
+Caches are dual-mode: locally the server writes JSON files under `server/src/data/`; in Lambda it reads/writes the DynamoDB tables injected via `EDGE_CACHE_TABLE` and `PLACES_CACHE_TABLE`.
 
 ## Routing algorithm
 
@@ -101,10 +104,18 @@ Notable wins:
 - **State-augmented A\* costs ~2× expansions** vs unconstrained (474 vs 262 on the
   same SF → LA), as expected since the state space roughly doubles.
 
-The Places API cache had **443 hits / 0 misses** on a warm SF→LA brand
-filter call — every charger in the corridor was already cached from
-prior calls. The cache is a JSON file written at runtime to
-`server/src/data/` (gitignored).
+The Places cache is three-tier: per-process memory → DynamoDB
+(production) or a JSON file (local dev) → Google Places API. On a warm
+SF→LA brand filter call every charger in the corridor is an in-memory
+hit and no API or DynamoDB calls happen. Concurrent requests for the
+same charger are coalesced into one fetch, and DynamoDB items carry a
+90-day TTL so stale entries expire automatically. Per-request log lines
+break the stats out as `places(mem/ddb/miss)=…`.
+
+A one-time `warm-places-cache.ts` script (`server/src/scripts/`) walks
+all ~2,711 US chargers and populates the cache, so the first
+brand-filtered route a real user runs doesn't pay the API cost. Point it
+at DynamoDB by setting `PLACES_CACHE_TABLE` before running it.
 
 ## Getting started
 
@@ -142,8 +153,11 @@ npm test --workspace=server   # 63 vitest cases across A*, heap, validation, cor
 | Variable | Where | What it does |
 |---|---|---|
 | `VITE_GOOGLE_MAPS_API_KEY` | `client/.env` | Maps JS SDK key. Restrict by HTTP referrer in production |
-| `GOOGLE_MAPS_API_KEY` | `server/.env` | Server-side key used for Places (new) + optional Distance Matrix. Restrict by IP in production |
-| `USE_HAVERSINE_EDGES` | `server/.env` | `true` (default) approximates edges with Haversine × 1.2 detour at 88 km/h. `false` uses the real Distance Matrix API with the JSON file cache |
+| `VITE_API_URL` | `client/.env` | Optional. Leave blank for local dev (Vite proxies `/api/*` to the local server). In production set to the API Gateway URL printed by `cdk deploy` |
+| `GOOGLE_MAPS_API_KEY` | `server/.env` / Lambda env | Server-side key used for Places (new) + optional Distance Matrix. Restrict by IP in production |
+| `USE_HAVERSINE_EDGES` | `server/.env` / Lambda env | `true` (default) approximates edges with Haversine × 1.2 detour at 88 km/h. `false` uses the real Distance Matrix API. In Lambda stay on Haversine until the edge cache is pre-warmed |
+| `EDGE_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for edge weights. Unset locally → falls back to `server/src/data/edge-cache.json` |
+| `PLACES_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for restaurant lookups (with 90-day TTL). Unset locally → falls back to `server/src/data/places-cache.json` |
 | `PORT` | `server/.env` | Server port (default 3001) |
 
 ## API
@@ -178,6 +192,25 @@ Returns a map of charger id → up to 6 nearby restaurants (name, formatted addr
 ### `GET /api/health`
 
 Returns service status.
+
+## Deployment
+
+The server runs on AWS Lambda behind API Gateway, provisioned by the CDK
+app in `infra/`. The client deploys to Vercel as a static build.
+
+```bash
+# Backend (requires AWS credentials + GOOGLE_MAPS_API_KEY exported)
+cd infra
+npx cdk deploy
+
+# Optional: pre-warm the places cache in DynamoDB so the first real
+# brand-filtered request doesn't pay the Places API cost (~$87 one-time).
+PLACES_CACHE_TABLE=VoltStack-PlacesCache... \
+  npx tsx server/src/scripts/warm-places-cache.ts
+
+# Frontend
+cd client && vercel deploy --prod
+```
 
 ## License
 
