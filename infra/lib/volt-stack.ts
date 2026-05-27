@@ -32,6 +32,7 @@ export class VoltStack extends Stack {
       partitionKey: { name: 'pk', type: AttributeType.STRING },
       billingMode: BillingMode.PAY_PER_REQUEST,
       removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
     });
 
     const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
