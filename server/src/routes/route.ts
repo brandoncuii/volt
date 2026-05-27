@@ -129,7 +129,7 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
       `[route] all=${totalChargers} corridor=${corridorSize} candidates=${pm.candidates} ` +
       `expansions=${pm.expansions} stops=${result.stops.length} ` +
       `edges(hit/miss/haversine)=${es.hits}/${es.misses}/${es.haversineCalls} ` +
-      `places(hit/miss)=${ps.hits}/${ps.misses} ` +
+      `places(mem/ddb/miss)=${ps.memHits}/${ps.ddbHits}/${ps.misses} ` +
       `t=${ms.toFixed(0)}ms`,
     );
     return res.json(result);
