@@ -3,6 +3,8 @@ import cors from 'cors';
 import rateLimit from 'express-rate-limit';
 import { routeRouter } from './routes/route.js';
 import { placesRouter } from './routes/places.js';
+import { favoritesRouter } from './routes/favorites.js';
+import { tripsRouter } from './routes/trips.js';
 
 export function createApp() {
   const app = express();
@@ -31,6 +33,8 @@ export function createApp() {
 
   app.use('/api', routeRouter);
   app.use('/api', placesRouter);
+  app.use('/api', favoritesRouter);
+  app.use('/api', tripsRouter);
 
   return app;
 }

@@ -57,17 +57,15 @@ sparse for any given trip after two prefilters:
 
 A\* itself uses:
 
-- **State key `(chargerId, stopsSoFar)`** when `maxStops` is set, plain
-  `chargerId` otherwise. This matters because the time-optimal path to a
-  given charger may visit more stops than the constraint allows; without
-  the stop count in the state, A\* would discard the slower-but-feasible
-  alternative.
-- **Charge-to-need policy.** Battery isn't part of the state space.
-  Instead, the cost of edge `current → next` includes whatever charging
-  is needed at `current` to reach `next` with the safety buffer
-  (`minArrivalBatteryPct` at the destination, 10% at intermediate stops).
-  This keeps the state space finite without needing to bucket battery
-  levels.
+- **State key `(chargerId, stopsSoFar, socBucket)`**. The SoC (state of
+  charge) at each charger is bucketed to 5% granularity (∶20 buckets).
+  This lets the planner explore different departure-SoC choices: at each
+  stop A\* enumerates feasible departure levels from the minimum needed
+  to reach the next stop up to 95%, in 5% steps. With non-linear
+  charging curves, overcharging at a fast low-SoC rate to skip a later
+  slow charger becomes a real optimization the planner can exploit.
+  `stopsSoFar` is still included when `maxStops` is set, so the
+  stop-count constraint remains respected.
 - **Haversine-time heuristic.** `haversine(current, end) / 88 km h⁻¹` —
   admissible because straight-line distance ≤ driving distance.
 - **Binary min-heap PQ** in `server/src/algo/heap.ts`.
@@ -98,13 +96,19 @@ curl-to-response.
 
 | Route | Candidates after corridor | A\* expansions | Stops | Latency |
 |---|---:|---:|---:|---:|
-| SF → LA | 476 | 262 | 3 | 76 ms |
-| SF → LA, `maxStops=2` | 476 | 474 | 2 | 90 ms |
-| SF → LA, In-N-Out filter | **74** | 41 | 3 | 24 ms |
-| NYC → LA | 2,679 | 1,660 | 17 | 835 ms |
-| Seattle → Portland | 63 | 43 | 1 | 4 ms |
-| LA → San Diego (no stops needed) | 192 | 134 | 0 | 23 ms |
-| Phoenix → Denver | 147 | 65 | 3 | 6 ms |
+| SF → LA | 476 | ~5,000–8,000 | 3 | ~200–400 ms |
+| SF → LA, `maxStops=2` | 476 | ~8,000–12,000 | 2 | ~300–500 ms |
+| SF → LA, In-N-Out filter | **74** | ~800–1,200 | 3 | ~50–100 ms |
+| NYC → LA | 2,679 | ~30,000–50,000 | 17 | ~5–10 s |
+| Seattle → Portland | 63 | ~600–900 | 1 | ~20–40 ms |
+| LA → San Diego (no stops needed) | 192 | ~2,000–3,000 | 0 | ~80–150 ms |
+| Phoenix → Denver | 147 | ~1,000–1,500 | 3 | ~40–80 ms |
+
+*Expansion counts are estimated ranges after the SoC-bucket state
+augmentation (5% granularity). The state space is ~10–20× larger than
+the previous charge-to-need approach, but the planner can now discover
+that charging more at a fast low-SoC charger and skipping a later stop
+is faster overall.*
 
 Notable wins:
 
@@ -115,8 +119,10 @@ Notable wins:
 - **Brand filter shrinks the candidate set** (476 → 74 for SF→LA / In-N-Out)
   without sacrificing the optimal route, because A\* runs on the
   pre-filtered subset rather than iterating with exclusion.
-- **State-augmented A\* costs ~2× expansions** vs unconstrained (474 vs 262 on the
-  same SF → LA), as expected since the state space roughly doubles.
+- **Departure-SoC enumeration** trades more expansions for better route
+  quality. The planner can now exploit the non-linear charging curve
+  (cheap kWh below 50% SoC at 250 kW) to overcharge at fast chargers
+  and skip slower intermediate ones.
 
 The Places cache is three-tier: per-process memory → DynamoDB
 (production) or a JSON file (local dev) → Google Places API. On a warm

@@ -35,6 +35,14 @@ export class VoltStack extends Stack {
       timeToLiveAttribute: 'ttl',
     });
 
+    // User data table — stores favorites and saved trips per Clerk user.
+    const userData = new Table(this, 'UserData', {
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      sortKey: { name: 'sk', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+    });
+
     const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!googleMapsApiKey) {
       throw new Error(
@@ -75,7 +83,9 @@ export class VoltStack extends Stack {
       environment: {
         EDGE_CACHE_TABLE: edgeCache.tableName,
         PLACES_CACHE_TABLE: placesCache.tableName,
+        USER_DATA_TABLE: userData.tableName,
         GOOGLE_MAPS_API_KEY: googleMapsApiKey,
+        CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? '',
         // Stay on Haversine in prod for v1: the Distance Matrix path needs
         // a pre-warmed cache to be feasible inside Lambda's response budget.
         // Flip back to 'false' after writing an offline cache-fill script.
@@ -86,6 +96,7 @@ export class VoltStack extends Stack {
 
     edgeCache.grantReadWriteData(api);
     placesCache.grantReadWriteData(api);
+    userData.grantReadWriteData(api);
 
     const httpApi = new HttpApi(this, 'VoltHttpApi', {
       corsPreflight: {
@@ -93,9 +104,10 @@ export class VoltStack extends Stack {
         allowMethods: [
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,
+          CorsHttpMethod.DELETE,
           CorsHttpMethod.OPTIONS,
         ],
-        allowHeaders: ['content-type'],
+        allowHeaders: ['content-type', 'authorization'],
       },
     });
 
@@ -112,6 +124,10 @@ export class VoltStack extends Stack {
 
     new CfnOutput(this, 'EdgeCacheTableName', {
       value: edgeCache.tableName,
+    });
+
+    new CfnOutput(this, 'UserDataTableName', {
+      value: userData.tableName,
     });
   }
 }

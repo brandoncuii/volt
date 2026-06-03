@@ -75,14 +75,14 @@ export interface PlacesRequest {
 // What the backend returns: chargerId -> top restaurants near that charger
 export type PlacesResponse = Record<string, Restaurant[]>;
 
-// Favorites
+// Favorite item — a charger or brand the user has hearted
 export interface Favorite {
   type: 'charger' | 'brand';
   id: string;
   createdAt: string;
 }
 
-// Saved trips
+// Saved trip — stores the RouteRequest so it can be re-run
 export interface SavedTrip {
   tripId: string;
   name: string;
@@ -90,5 +90,6 @@ export interface SavedTrip {
   createdAt: string;
 }
 
+// API responses for favorites and trips
 export type FavoritesResponse = Favorite[];
 export type TripsResponse = SavedTrip[];
