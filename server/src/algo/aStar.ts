@@ -5,12 +5,11 @@ import type {
   RouteStop,
 } from '@volt/shared';
 import { haversineKm } from '../graph/haversine.js';
+import { chargeTimeMin } from './chargingCurve.js';
 import { getEdgeWeight, flushEdgeCache } from '../graph/edges.js';
 import { MinHeap } from './heap.js';
 
 // Tesla-ish efficiency: ~155 Wh/km → batteryCapacityKWh = rangeKm * 0.155.
-// Charging modeled as linear at the charger's rated power (real DC fast
-// charging tapers above ~80%; refine in a later phase if needed).
 const EFFICIENCY_KWH_PER_KM = 0.155;
 const SAFETY_BUFFER_PCT = 10; // min arrival battery at intermediate stops
 const AVG_SPEED_KMH = 88; // for the A* heuristic
@@ -152,9 +151,12 @@ export async function planRoute(
       let chargingTimeMin = 0;
       if (departureBattery < requiredDeparture) {
         if (currentId === START_ID) continue; // can't charge at the start point
-        const deltaPct = requiredDeparture - departureBattery;
-        chargingTimeMin =
-          ((deltaPct / 100) * batteryCapacityKWh) / current.powerKW * 60;
+        chargingTimeMin = chargeTimeMin(
+          departureBattery,
+          requiredDeparture,
+          current.powerKW,
+          batteryCapacityKWh,
+        );
         departureBattery = requiredDeparture;
       }
 

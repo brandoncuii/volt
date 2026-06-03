@@ -150,4 +150,31 @@ describe('planRoute', () => {
     expect(result.stops.length).toBeGreaterThan(0);
     expect(result.stops.length).toBeLessThanOrEqual(3);
   });
+
+  it('non-linear charging: low-power charger yields more charging time than high-power', async () => {
+    // Two routes that force charging — one with a low-power charger, one high.
+    const lowPowerChargers: Supercharger[] = [
+      makeCharger('bakers_low', 35.3733, -119.0187, 72),
+      makeCharger('fresno_low', 36.7378, -119.7871, 72),
+      makeCharger('modesto_low', 37.6391, -120.9969, 72),
+    ];
+
+    const req: RouteRequest = {
+      start: { lat: 34.0522, lng: -118.2437 },
+      end: { lat: 37.7749, lng: -122.4194 },
+      vehicleRangeKm: 300,
+      startBatteryPct: 80,
+      minArrivalBatteryPct: 10,
+    };
+
+    const resultHigh = await planRoute(chargers, req);   // 250 kW chargers
+    const resultLow = await planRoute(lowPowerChargers, req); // 72 kW chargers
+
+    // Both routes need charging, but the low-power route should charge longer
+    expect(resultLow.totalChargingTimeMin).toBeGreaterThan(0);
+    expect(resultHigh.totalChargingTimeMin).toBeGreaterThan(0);
+    expect(resultLow.totalChargingTimeMin).toBeGreaterThan(
+      resultHigh.totalChargingTimeMin,
+    );
+  });
 });
