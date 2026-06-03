@@ -23,6 +23,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-dynamodb": "^3.1053.0",
+    "@clerk/backend": "^3.5.0",
     "@volt/shared": "*",
     "cors": "^2.8.6",
     "dotenv": "^17.4.2",
