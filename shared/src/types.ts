@@ -74,3 +74,21 @@ export interface PlacesRequest {
 
 // What the backend returns: chargerId -> top restaurants near that charger
 export type PlacesResponse = Record<string, Restaurant[]>;
+
+// Favorites
+export interface Favorite {
+  type: 'charger' | 'brand';
+  id: string;
+  createdAt: string;
+}
+
+// Saved trips
+export interface SavedTrip {
+  tripId: string;
+  name: string;
+  request: RouteRequest;
+  createdAt: string;
+}
+
+export type FavoritesResponse = Favorite[];
+export type TripsResponse = SavedTrip[];

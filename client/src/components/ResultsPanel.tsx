@@ -11,6 +11,7 @@ import {
   CardTitle,
 } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
+import { Button } from '@/components/ui/button';
 import { Separator } from '@/components/ui/separator';
 import { Skeleton } from '@/components/ui/skeleton';
 import {
@@ -19,6 +20,9 @@ import {
   Star,
   Utensils,
   AlertCircle,
+  Heart,
+  Share2,
+  Save,
 } from 'lucide-react';
 import { kmToMi } from '@/lib/units';
 import {
@@ -33,6 +37,10 @@ interface Props {
   restaurants: PlacesResponse | null;
   restaurantsLoading: boolean;
   selectedBrands: Brand[];
+  onShare: () => void;
+  onSaveTrip?: () => void;
+  isFavorite?: (type: 'charger' | 'brand', id: string) => boolean;
+  onToggleFavorite?: (type: 'charger' | 'brand', id: string) => void;
 }
 
 const MAX_RESTAURANTS_SHOWN = 4;
@@ -64,11 +72,27 @@ export function ResultsPanel({
   restaurants,
   restaurantsLoading,
   selectedBrands,
+  onShare,
+  onSaveTrip,
+  isFavorite,
+  onToggleFavorite,
 }: Props) {
   return (
     <Card>
       <CardHeader>
-        <CardTitle>Trip summary</CardTitle>
+        <div className="flex items-center justify-between">
+          <CardTitle>Trip summary</CardTitle>
+          <div className="flex gap-1.5">
+            <Button variant="ghost" size="icon-xs" onClick={onShare} title="Share link">
+              <Share2 className="h-3.5 w-3.5" />
+            </Button>
+            {onSaveTrip && (
+              <Button variant="ghost" size="icon-xs" onClick={onSaveTrip} title="Save trip">
+                <Save className="h-3.5 w-3.5" />
+              </Button>
+            )}
+          </div>
+        </div>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid grid-cols-2 gap-3 text-sm">
@@ -97,6 +121,7 @@ export function ResultsPanel({
                 selectedBrands.length > 0 &&
                 restaurants !== null &&
                 !chargerSatisfiesBrands(list, selectedBrands);
+              const favorited = isFavorite?.('charger', stop.charger.id) ?? false;
               return (
                 <li
                   key={stop.charger.id}
@@ -114,9 +139,28 @@ export function ResultsPanel({
                         </div>
                       </div>
                     </div>
-                    <Badge variant="secondary" className="shrink-0">
-                      {stop.charger.powerKW} kW
-                    </Badge>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      {onToggleFavorite && (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            onToggleFavorite('charger', stop.charger.id)
+                          }
+                          className="text-muted-foreground hover:text-red-500 transition-colors"
+                          title={favorited ? 'Remove from favorites' : 'Add to favorites'}
+                        >
+                          <Heart
+                            className={cn(
+                              'h-4 w-4',
+                              favorited && 'fill-red-500 text-red-500',
+                            )}
+                          />
+                        </button>
+                      )}
+                      <Badge variant="secondary" className="shrink-0">
+                        {stop.charger.powerKW} kW
+                      </Badge>
+                    </div>
                   </div>
 
                   <div className="flex items-center gap-2 text-xs text-muted-foreground">
