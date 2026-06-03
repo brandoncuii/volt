@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { RouteRequest } from '@volt/shared';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -105,6 +105,11 @@ export function RouteForm({
     );
   };
 
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => {
+    onSubmitRef.current = onSubmit;
+  }, [onSubmit]);
+
   const populateAndSubmit = useCallback(
     (req: RouteRequest) => {
       const startPlace: PlaceValue = {
@@ -128,12 +133,12 @@ export function RouteForm({
         setMaxStops(MAX_STOPS_ANY);
       }
       setCarId(CUSTOM_CAR_ID);
-      onSubmit(req);
+      onSubmitRef.current(req);
     },
-    [onSubmit],
+    [],
   );
 
-  // Expose imperative handle to parent
+  // Expose imperative handle to parent (stable — fires once)
   useEffect(() => {
     onReady?.({ populateAndSubmit });
   }, [onReady, populateAndSubmit]);
