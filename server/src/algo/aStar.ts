@@ -14,6 +14,8 @@ const EFFICIENCY_KWH_PER_KM = 0.155;
 const SAFETY_BUFFER_PCT = 10; // min arrival battery at intermediate stops
 const AVG_SPEED_KMH = 88; // for the A* heuristic
 const RANGE_PREFILTER_FACTOR = 0.9; // skip edges Haversine-close to the range limit
+const SOC_BUCKET_SIZE = 5; // 5% granularity → 20 buckets
+const MAX_DEPARTURE_SOC = 95; // charging above 95% is extremely slow
 
 const START_ID = '__start__';
 const END_ID = '__end__';
@@ -27,12 +29,12 @@ interface EdgeRecord {
   departureBatteryFromPrevPct: number;
 }
 
-// State key encodes both the node id and how many charger stops the path
-// taking us here has visited so far. Different stopCounts for the same
-// charger are distinct states — necessary when `maxStops` is active, since
-// the time-optimal path to X may not respect the cap.
-function makeKey(id: string, stopCount: number): string {
-  return `${id}#${stopCount}`;
+function socBucket(pct: number): number {
+  return Math.floor(pct / SOC_BUCKET_SIZE) * SOC_BUCKET_SIZE;
+}
+
+function makeKey(id: string, stopCount: number, soc: number): string {
+  return `${id}#${stopCount}#${socBucket(soc)}`;
 }
 
 export interface PlanMetrics {
@@ -45,9 +47,9 @@ export function getLastPlanMetrics(): PlanMetrics {
   return lastMetrics;
 }
 
-function parseKey(key: string): { id: string; stopCount: number } {
-  const idx = key.lastIndexOf('#');
-  return { id: key.slice(0, idx), stopCount: Number(key.slice(idx + 1)) };
+function parseKey(key: string): { id: string; stopCount: number; soc: number } {
+  const parts = key.split('#');
+  return { id: parts[0]!, stopCount: Number(parts[1]!), soc: Number(parts[2]!) };
 }
 
 export async function planRoute(
@@ -102,7 +104,7 @@ export async function planRoute(
   const arrivalBattery = new Map<string, number>();
   const edgeIn = new Map<string, EdgeRecord>();
 
-  const startKey = makeKey(START_ID, 0);
+  const startKey = makeKey(START_ID, 0, req.startBatteryPct);
   heap.push(startKey, 0);
   gScore.set(startKey, 0);
   arrivalBattery.set(startKey, req.startBatteryPct);
@@ -147,40 +149,63 @@ export async function planRoute(
       const requiredDeparture = requiredArrival + energyPct;
       if (requiredDeparture > 100) continue;
 
-      let departureBattery = currentBattery;
-      let chargingTimeMin = 0;
-      if (departureBattery < requiredDeparture) {
-        if (currentId === START_ID) continue; // can't charge at the start point
-        chargingTimeMin = chargeTimeMin(
-          departureBattery,
-          requiredDeparture,
-          current.powerKW,
-          batteryCapacityKWh,
-        );
-        departureBattery = requiredDeparture;
+      // Build list of departure SoCs to evaluate
+      const departureSoCs: number[] = [];
+
+      if (currentId === START_ID) {
+        // Can't charge at start — single option
+        if (currentBattery >= requiredDeparture) {
+          departureSoCs.push(currentBattery);
+        }
+      } else if (isEnd) {
+        // End node: no benefit to overcharging, use minimum
+        const effMin = Math.max(requiredDeparture, currentBattery);
+        if (effMin <= 100) departureSoCs.push(effMin);
+      } else {
+        // Enumerate feasible departure SoCs at this charger
+        const effMin = Math.max(requiredDeparture, currentBattery);
+        if (effMin <= 100) {
+          departureSoCs.push(effMin);
+          let next = Math.ceil(effMin / SOC_BUCKET_SIZE) * SOC_BUCKET_SIZE;
+          if (next <= effMin) next += SOC_BUCKET_SIZE;
+          for (let dep = next; dep <= MAX_DEPARTURE_SOC; dep += SOC_BUCKET_SIZE) {
+            departureSoCs.push(dep);
+          }
+        }
       }
-
-      const arrival = departureBattery - energyPct;
-      const tentativeG = currentG + chargingTimeMin + edge.drivingTimeMin;
-
-      const nbKey = makeKey(nb.id, newStopCount);
-      const prevG = gScore.get(nbKey);
-      if (prevG !== undefined && tentativeG >= prevG) continue;
-
-      gScore.set(nbKey, tentativeG);
-      arrivalBattery.set(nbKey, arrival);
-      edgeIn.set(nbKey, {
-        prevKey: currentKey,
-        distanceKm: edge.distanceKm,
-        drivingTimeMin: edge.drivingTimeMin,
-        arrivalBatteryPct: arrival,
-        chargingTimeAtPrevMin: chargingTimeMin,
-        departureBatteryFromPrevPct: departureBattery,
-      });
 
       const h =
         (haversineKm(nb.location, endNode.location) / AVG_SPEED_KMH) * 60;
-      heap.push(nbKey, tentativeG + h);
+
+      for (const depSoC of departureSoCs) {
+        const chargingMin = depSoC > currentBattery
+          ? chargeTimeMin(
+              currentBattery,
+              depSoC,
+              current.powerKW,
+              batteryCapacityKWh,
+            )
+          : 0;
+        const arrival = depSoC - energyPct;
+        const tentativeG = currentG + chargingMin + edge.drivingTimeMin;
+
+        const nbKey = makeKey(nb.id, newStopCount, arrival);
+        const prevG = gScore.get(nbKey);
+        if (prevG !== undefined && tentativeG >= prevG) continue;
+
+        gScore.set(nbKey, tentativeG);
+        arrivalBattery.set(nbKey, arrival);
+        edgeIn.set(nbKey, {
+          prevKey: currentKey,
+          distanceKm: edge.distanceKm,
+          drivingTimeMin: edge.drivingTimeMin,
+          arrivalBatteryPct: arrival,
+          chargingTimeAtPrevMin: chargingMin,
+          departureBatteryFromPrevPct: depSoC,
+        });
+
+        heap.push(nbKey, tentativeG + h);
+      }
     }
   }
 
