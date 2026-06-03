@@ -72,9 +72,23 @@ A\* itself uses:
   admissible because straight-line distance ≤ driving distance.
 - **Binary min-heap PQ** in `server/src/algo/heap.ts`.
 
-Charging time is modeled linearly at the charger's rated power against a
-Tesla-ish 155 Wh/km. Real DC fast charging tapers above ~80%; that's a
-known simplification documented in the source.
+### Charging curve
+
+Charging time uses a piecewise-linear model of delivered power vs. SoC,
+based on Tesla V3 Supercharger data:
+
+| SoC band | Delivered power |
+|----------|-----------------|
+| 0–50 %   | 250 kW          |
+| 50–80 %  | 120 kW          |
+| 80–95 %  | 60 kW           |
+| 95–100 % | 30 kW           |
+
+Each segment's power is capped at the charger's rated power —
+a 150 kW charger never delivers 250 kW. Time is integrated analytically
+per band. The previous linear model under-estimated high-SoC charging by
+~3–4×, which prevented the planner from discovering that two short stops
+can beat one long stop.
 
 ## Performance
 
