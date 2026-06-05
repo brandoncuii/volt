@@ -28,6 +28,10 @@ export async function requireAuth(
   try {
     const { sub } = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY!,
+      authorizedParties: [
+        'https://volt-rust-phi.vercel.app',
+        'http://localhost:5173',
+      ],
     });
     if (!sub) {
       res.status(401).json({ error: 'unauthorized', details: 'Invalid token' });
