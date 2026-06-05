@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type {
   RouteRequest,
   RouteResponse,
@@ -10,13 +10,41 @@ import { useGoogleMaps } from '@/lib/maps';
 import { RouteForm } from '@/components/RouteForm';
 import { ResultsPanel } from '@/components/ResultsPanel';
 import { MapView } from '@/components/MapView';
+import { SavedTripsDrawer } from '@/components/SavedTripsDrawer';
 import { Toaster } from '@/components/ui/sonner';
 import { Skeleton } from '@/components/ui/skeleton';
+import { Button } from '@/components/ui/button';
 import { toast } from 'sonner';
 import { Zap } from 'lucide-react';
+import { encodeRouteRequest, decodeRouteRequest } from '@/lib/urlState';
+import { useFavorites } from '@/hooks/useFavorites';
+import { useSavedTrips } from '@/hooks/useSavedTrips';
+import {
+  SignInButton,
+  UserButton,
+  useAuth,
+} from '@clerk/clerk-react';
+
+const CLERK_CONFIGURED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
+
+function useOptionalAuth() {
+  if (CLERK_CONFIGURED) {
+    // Hook call order is stable — CLERK_CONFIGURED is a build-time constant.
+    // eslint-disable-next-line react-hooks/rules-of-hooks
+    const { isSignedIn, getToken } = useAuth();
+    return { isSignedIn: isSignedIn ?? false, getToken, clerkReady: true };
+  }
+  return {
+    isSignedIn: false,
+    getToken: async () => null as string | null,
+    clerkReady: false,
+  };
+}
 
 function App() {
   const { isLoaded, loadError } = useGoogleMaps();
+  const { isSignedIn, getToken, clerkReady } = useOptionalAuth();
+
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState<RouteResponse | null>(null);
   const [restaurants, setRestaurants] = useState<PlacesResponse | null>(null);
@@ -27,6 +55,42 @@ function App() {
   } | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Brand[]>([]);
   const [partialFit, setPartialFit] = useState(false);
+  const [lastRequest, setLastRequest] = useState<RouteRequest | null>(null);
+  const pendingHashRef = useRef<RouteRequest | null>(
+    (() => {
+      const hash = window.location.hash.slice(1);
+      if (!hash) return null;
+      return decodeRouteRequest(hash);
+    })(),
+  );
+  const [formRef, setFormRef] = useState<{
+    populateAndSubmit: (req: RouteRequest) => void;
+  } | null>(null);
+
+  const stableGetToken = useCallback(
+    () => getToken(),
+    [getToken],
+  );
+
+  const { addFavorite, removeFavorite, isFavorite } = useFavorites({
+    isSignedIn,
+    getToken: stableGetToken,
+  });
+
+  const {
+    trips,
+    loading: tripsLoading,
+    saveTrip,
+    deleteTrip,
+  } = useSavedTrips({ isSignedIn, getToken: stableGetToken });
+
+  // Auto-submit when form is ready and we have a pending hash request
+  useEffect(() => {
+    if (pendingHashRef.current && formRef) {
+      formRef.populateAndSubmit(pendingHashRef.current);
+      pendingHashRef.current = null;
+    }
+  }, [formRef]);
 
   const handleSubmit = async (req: RouteRequest) => {
     setLoading(true);
@@ -34,6 +98,10 @@ function App() {
     setRestaurants(null);
     setPartialFit(false);
     setEndpoints({ start: req.start, end: req.end });
+    setLastRequest(req);
+
+    // Update URL hash
+    window.history.replaceState(null, '', '#' + encodeRouteRequest(req));
 
     const reqWithBrands: RouteRequest = {
       ...req,
@@ -47,8 +115,6 @@ function App() {
       try {
         route = await fetchRoute(reqWithBrands);
       } catch (e) {
-        // If the brand filter made the trip infeasible, fall back to a plain
-        // route and let the user see what was closest.
         if (selectedBrands.length > 0) {
           route = await fetchRoute(req);
           setPartialFit(true);
@@ -82,6 +148,38 @@ function App() {
     }
   };
 
+  const handleShare = async () => {
+    try {
+      await navigator.clipboard.writeText(window.location.href);
+      toast.success('Link copied to clipboard');
+    } catch {
+      toast.error('Could not copy link');
+    }
+  };
+
+  const handleSaveTrip = async () => {
+    if (!lastRequest) return;
+    const name = `Trip ${new Date().toLocaleDateString()}`;
+    await saveTrip(name, lastRequest);
+    toast.success('Trip saved');
+  };
+
+  const handleLoadTrip = (request: RouteRequest) => {
+    if (formRef) {
+      formRef.populateAndSubmit(request);
+    }
+  };
+
+  const toggleFavorite = isSignedIn
+    ? (type: 'charger' | 'brand', id: string) => {
+        if (isFavorite(type, id)) {
+          void removeFavorite(type, id);
+        } else {
+          void addFavorite(type, id);
+        }
+      }
+    : undefined;
+
   return (
     <div className="h-screen flex flex-col bg-background">
       <header className="border-b px-6 py-3 flex items-center gap-2">
@@ -90,6 +188,24 @@ function App() {
         <span className="text-sm text-muted-foreground ml-2">
           EV trip planner — US Superchargers
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          {clerkReady && isSignedIn && (
+            <SavedTripsDrawer
+              trips={trips}
+              loading={tripsLoading}
+              onLoad={handleLoadTrip}
+              onDelete={deleteTrip}
+            />
+          )}
+          {clerkReady && !isSignedIn && (
+            <SignInButton>
+              <Button variant="ghost" size="sm">
+                Sign in
+              </Button>
+            </SignInButton>
+          )}
+          {clerkReady && isSignedIn && <UserButton />}
+        </div>
       </header>
 
       <div className="flex-1 grid grid-cols-1 md:grid-cols-[400px_1fr] overflow-hidden">
@@ -100,6 +216,9 @@ function App() {
               loading={loading}
               selectedBrands={selectedBrands}
               onSelectedBrandsChange={setSelectedBrands}
+              onReady={setFormRef}
+              isFavorite={isSignedIn ? isFavorite : undefined}
+              onToggleFavorite={toggleFavorite}
             />
           ) : loadError ? (
             <div className="text-sm text-destructive">
@@ -120,6 +239,10 @@ function App() {
               restaurants={restaurants}
               restaurantsLoading={restaurantsLoading}
               selectedBrands={selectedBrands}
+              onShare={handleShare}
+              onSaveTrip={isSignedIn ? handleSaveTrip : undefined}
+              isFavorite={isSignedIn ? isFavorite : undefined}
+              onToggleFavorite={toggleFavorite}
             />
           )}
         </aside>

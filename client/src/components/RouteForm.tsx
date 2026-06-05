@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect, useCallback, useRef } from 'react';
 import type { RouteRequest } from '@volt/shared';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -16,7 +16,7 @@ import { BrandFilter } from '@/components/BrandFilter';
 import { CarSelector } from '@/components/CarSelector';
 import { findCar, CUSTOM_CAR_ID } from '@/lib/cars';
 import type { PlaceValue } from '@/lib/maps';
-import { miToKm } from '@/lib/units';
+import { miToKm, kmToMi } from '@/lib/units';
 import type { Brand } from '@volt/shared';
 import { MapPin, LoaderCircle } from 'lucide-react';
 import { toast } from 'sonner';
@@ -29,6 +29,9 @@ interface Props {
   loading: boolean;
   selectedBrands: Brand[];
   onSelectedBrandsChange: (brands: Brand[]) => void;
+  onReady?: (ref: { populateAndSubmit: (req: RouteRequest) => void }) => void;
+  isFavorite?: (type: 'charger' | 'brand', id: string) => boolean;
+  onToggleFavorite?: (type: 'charger' | 'brand', id: string) => void;
 }
 
 export function RouteForm({
@@ -36,6 +39,9 @@ export function RouteForm({
   loading,
   selectedBrands,
   onSelectedBrandsChange,
+  onReady,
+  isFavorite,
+  onToggleFavorite,
 }: Props) {
   const [start, setStart] = useState<PlaceValue | null>(null);
   const [end, setEnd] = useState<PlaceValue | null>(null);
@@ -60,8 +66,6 @@ export function RouteForm({
 
   const handleRangeChange = (mi: number) => {
     setVehicleRangeMi(mi);
-    // If the user drags the slider away from the selected car's spec, drop
-    // back to "Custom range" so the labels don't lie.
     if (carId !== CUSTOM_CAR_ID) {
       const car = findCar(carId);
       if (!car || car.rangeMi !== mi) setCarId(CUSTOM_CAR_ID);
@@ -100,6 +104,44 @@ export function RouteForm({
       { enableHighAccuracy: false, timeout: 10_000 },
     );
   };
+
+  const onSubmitRef = useRef(onSubmit);
+  useEffect(() => {
+    onSubmitRef.current = onSubmit;
+  }, [onSubmit]);
+
+  const populateAndSubmit = useCallback(
+    (req: RouteRequest) => {
+      const startPlace: PlaceValue = {
+        lat: req.start.lat,
+        lng: req.start.lng,
+        description: `${req.start.lat.toFixed(4)}, ${req.start.lng.toFixed(4)}`,
+      };
+      const endPlace: PlaceValue = {
+        lat: req.end.lat,
+        lng: req.end.lng,
+        description: `${req.end.lat.toFixed(4)}, ${req.end.lng.toFixed(4)}`,
+      };
+      setStart(startPlace);
+      setEnd(endPlace);
+      setVehicleRangeMi(Math.round(kmToMi(req.vehicleRangeKm)));
+      setStartBatteryPct(req.startBatteryPct);
+      setMinArrivalBatteryPct(req.minArrivalBatteryPct);
+      if (req.maxStops !== undefined) {
+        setMaxStops(String(req.maxStops));
+      } else {
+        setMaxStops(MAX_STOPS_ANY);
+      }
+      setCarId(CUSTOM_CAR_ID);
+      onSubmitRef.current(req);
+    },
+    [],
+  );
+
+  // Expose imperative handle to parent (stable — fires once)
+  useEffect(() => {
+    onReady?.({ populateAndSubmit });
+  }, [onReady, populateAndSubmit]);
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
@@ -238,6 +280,8 @@ export function RouteForm({
           <BrandFilter
             selected={selectedBrands}
             onChange={onSelectedBrandsChange}
+            isFavorite={isFavorite}
+            onToggleFavorite={onToggleFavorite}
           />
 
           <Button type="submit" disabled={!canSubmit} className="w-full">
