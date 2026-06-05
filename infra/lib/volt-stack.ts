@@ -100,7 +100,7 @@ export class VoltStack extends Stack {
 
     const httpApi = new HttpApi(this, 'VoltHttpApi', {
       corsPreflight: {
-        allowOrigins: ['*'], // tighten to the Vercel URL after first deploy
+        allowOrigins: ['https://volt-rust-phi.vercel.app', 'http://localhost:5173'],
         allowMethods: [
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,
