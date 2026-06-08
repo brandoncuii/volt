@@ -4,6 +4,7 @@ import {
   fetchTrips,
   saveTrip as apiSaveTrip,
   deleteTrip as apiDeleteTrip,
+  renameTrip as apiRenameTrip,
 } from '@/lib/api';
 
 interface UseSavedTripsOptions {
@@ -88,6 +89,23 @@ export function useSavedTrips({
     [getToken],
   );
 
+  const renameTripFn = useCallback(
+    async (tripId: string, name: string) => {
+      const token = await getToken();
+      if (!token) return;
+      const prev = trips;
+      setTrips((ts) =>
+        ts.map((t) => (t.tripId === tripId ? { ...t, name } : t)),
+      );
+      try {
+        await apiRenameTrip(token, tripId, name);
+      } catch {
+        setTrips(prev);
+      }
+    },
+    [getToken, trips],
+  );
+
   const effectiveTrips = isSignedIn ? trips : [];
 
   return {
@@ -96,5 +114,6 @@ export function useSavedTrips({
     error,
     saveTrip: saveTripFn,
     deleteTrip: deleteTripFn,
+    renameTrip: renameTripFn,
   };
 }

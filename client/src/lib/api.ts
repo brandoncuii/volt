@@ -61,6 +61,26 @@ async function authPost<T>(
   return (await res.json()) as T;
 }
 
+async function authPatch(
+  path: string,
+  token: string,
+  body: unknown,
+): Promise<void> {
+  const res = await fetch(`${API_BASE}${path}`, {
+    method: 'PATCH',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = (await res.json().catch(() => null)) as ApiError | null;
+    throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
+  }
+}
+
 async function authDelete(path: string, token: string): Promise<void> {
   const res = await fetch(`${API_BASE}${path}`, {
     method: 'DELETE',
@@ -117,4 +137,12 @@ export function saveTrip(
 
 export function deleteTrip(token: string, tripId: string): Promise<void> {
   return authDelete(`/api/trips/${tripId}`, token);
+}
+
+export function renameTrip(
+  token: string,
+  tripId: string,
+  name: string,
+): Promise<void> {
+  return authPatch(`/api/trips/${tripId}`, token, { name });
 }

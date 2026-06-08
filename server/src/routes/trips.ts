@@ -3,7 +3,7 @@ import type { Response } from 'express';
 import crypto from 'node:crypto';
 import type { ApiError, RouteRequest } from '@volt/shared';
 import { requireAuth, type AuthRequest } from '../auth/clerk.js';
-import { getTrips, saveTrip, deleteTrip } from '../dynamo/userData.js';
+import { getTrips, saveTrip, deleteTrip, renameTrip } from '../dynamo/userData.js';
 
 export const tripsRouter = Router();
 
@@ -70,6 +70,32 @@ tripsRouter.post('/trips', requireAuth, async (req, res: Response) => {
     };
     await saveTrip(userId, trip);
     res.status(201).json(trip);
+  } catch (e) {
+    const err: ApiError = {
+      error: 'trips_failed',
+      details: e instanceof Error ? e.message : 'unknown error',
+    };
+    res.status(500).json(err);
+  }
+});
+
+tripsRouter.patch('/trips/:tripId', requireAuth, async (req, res: Response) => {
+  const { userId } = req as AuthRequest;
+  const tripId = req.params.tripId as string;
+  const body = req.body as Record<string, unknown>;
+
+  if (typeof body.name !== 'string' || body.name.trim().length === 0) {
+    const err: ApiError = {
+      error: 'invalid_request',
+      details: 'name must be a non-empty string',
+    };
+    res.status(400).json(err);
+    return;
+  }
+
+  try {
+    await renameTrip(userId, tripId, body.name.trim());
+    res.status(204).send();
   } catch (e) {
     const err: ApiError = {
       error: 'trips_failed',

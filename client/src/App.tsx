@@ -54,6 +54,7 @@ function App() {
     end: { lat: number; lng: number };
   } | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Brand[]>([]);
+  const [customTerms, setCustomTerms] = useState<string[]>([]);
   const [partialFit, setPartialFit] = useState(false);
   const [lastRequest, setLastRequest] = useState<RouteRequest | null>(null);
   const pendingHashRef = useRef<RouteRequest | null>(
@@ -82,6 +83,7 @@ function App() {
     loading: tripsLoading,
     saveTrip,
     deleteTrip,
+    renameTrip,
   } = useSavedTrips({ isSignedIn, getToken: stableGetToken });
 
   // Auto-submit when form is ready and we have a pending hash request
@@ -108,6 +110,7 @@ function App() {
       ...(selectedBrands.length > 0 && {
         restaurantBrandIds: selectedBrands.map((b) => b.id),
       }),
+      ...(customTerms.length > 0 && { restaurantQueries: customTerms }),
     };
 
     try {
@@ -115,7 +118,7 @@ function App() {
       try {
         route = await fetchRoute(reqWithBrands);
       } catch (e) {
-        if (selectedBrands.length > 0) {
+        if (selectedBrands.length > 0 || customTerms.length > 0) {
           route = await fetchRoute(req);
           setPartialFit(true);
         } else {
@@ -195,6 +198,7 @@ function App() {
               loading={tripsLoading}
               onLoad={handleLoadTrip}
               onDelete={deleteTrip}
+              onRename={renameTrip}
             />
           )}
           {clerkReady && !isSignedIn && (
@@ -216,6 +220,8 @@ function App() {
               loading={loading}
               selectedBrands={selectedBrands}
               onSelectedBrandsChange={setSelectedBrands}
+              customTerms={customTerms}
+              onCustomTermsChange={setCustomTerms}
               onReady={setFormRef}
               isFavorite={isSignedIn ? isFavorite : undefined}
               onToggleFavorite={toggleFavorite}
@@ -229,8 +235,8 @@ function App() {
           )}
           {partialFit && (
             <div className="rounded-md border border-yellow-500/40 bg-yellow-500/10 text-yellow-900 px-3 py-2 text-xs">
-              Couldn't find a route through your selected brands. Showing the
-              closest match without the brand filter.
+              Couldn't find a route matching your restaurant filters. Showing
+              the closest match without them.
             </div>
           )}
           {result && (

@@ -1,3 +1,4 @@
+import { useState } from 'react';
 import type { SavedTrip, RouteRequest } from '@volt/shared';
 import {
   Sheet,
@@ -8,13 +9,15 @@ import {
   SheetTrigger,
 } from '@/components/ui/sheet';
 import { Button } from '@/components/ui/button';
-import { Bookmark, Trash2, Play } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Bookmark, Trash2, Play, Pencil, Check, X } from 'lucide-react';
 
 interface Props {
   trips: SavedTrip[];
   loading: boolean;
   onLoad: (request: RouteRequest) => void;
   onDelete: (tripId: string) => void;
+  onRename: (tripId: string, name: string) => void;
 }
 
 function formatDate(iso: string): string {
@@ -25,7 +28,27 @@ function formatDate(iso: string): string {
   });
 }
 
-export function SavedTripsDrawer({ trips, loading, onLoad, onDelete }: Props) {
+export function SavedTripsDrawer({
+  trips,
+  loading,
+  onLoad,
+  onDelete,
+  onRename,
+}: Props) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [draft, setDraft] = useState('');
+
+  function startEdit(trip: SavedTrip) {
+    setEditingId(trip.tripId);
+    setDraft(trip.name);
+  }
+
+  function commitEdit(tripId: string) {
+    const name = draft.trim();
+    if (name) onRename(tripId, name);
+    setEditingId(null);
+  }
+
   return (
     <Sheet>
       <SheetTrigger asChild>
@@ -55,7 +78,50 @@ export function SavedTripsDrawer({ trips, loading, onLoad, onDelete }: Props) {
                   key={trip.tripId}
                   className="rounded-md border p-3 space-y-2"
                 >
-                  <div className="font-medium text-sm">{trip.name}</div>
+                  {editingId === trip.tripId ? (
+                    <div className="flex items-center gap-1">
+                      <Input
+                        autoFocus
+                        value={draft}
+                        onChange={(e) => setDraft(e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter') commitEdit(trip.tripId);
+                          if (e.key === 'Escape') setEditingId(null);
+                        }}
+                        className="h-7 text-sm"
+                      />
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => commitEdit(trip.tripId)}
+                        title="Save"
+                      >
+                        <Check className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="icon-xs"
+                        onClick={() => setEditingId(null)}
+                        title="Cancel"
+                      >
+                        <X className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  ) : (
+                    <div className="flex items-center gap-1">
+                      <span className="font-medium text-sm flex-1">
+                        {trip.name}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => startEdit(trip)}
+                        className="text-muted-foreground hover:text-foreground"
+                        title="Rename"
+                      >
+                        <Pencil className="h-3 w-3" />
+                      </button>
+                    </div>
+                  )}
                   <div className="text-xs text-muted-foreground">
                     {formatDate(trip.createdAt)}
                   </div>
