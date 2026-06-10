@@ -27,6 +27,8 @@ import {
 
 const CLERK_CONFIGURED = !!import.meta.env.VITE_CLERK_PUBLISHABLE_KEY;
 
+const noopGetToken = async (): Promise<string | null> => null;
+
 function useOptionalAuth() {
   if (CLERK_CONFIGURED) {
     // Hook call order is stable — CLERK_CONFIGURED is a build-time constant.
@@ -36,7 +38,7 @@ function useOptionalAuth() {
   }
   return {
     isSignedIn: false,
-    getToken: async () => null as string | null,
+    getToken: noopGetToken,
     clerkReady: false,
   };
 }

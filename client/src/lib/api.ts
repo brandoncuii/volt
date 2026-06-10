@@ -11,46 +11,20 @@ import type {
 // server. Set to the AWS API Gateway URL in Vercel for production.
 const API_BASE = import.meta.env.VITE_API_URL ?? '';
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => null)) as ApiError | null;
-    throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
-  }
-
-  return (await res.json()) as T;
-}
-
-async function authGet<T>(path: string, token: string): Promise<T> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => null)) as ApiError | null;
-    throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
-  }
-
-  return (await res.json()) as T;
-}
-
-async function authPost<T>(
+async function request<T>(
+  method: string,
   path: string,
-  token: string,
-  body: unknown,
+  options: { token?: string; body?: unknown; parse?: boolean } = {},
 ): Promise<T> {
+  const { token, body, parse = true } = options;
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers['Content-Type'] = 'application/json';
+  if (token !== undefined) headers.Authorization = `Bearer ${token}`;
+
   const res = await fetch(`${API_BASE}${path}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
+    method,
+    headers,
+    ...(body !== undefined && { body: JSON.stringify(body) }),
   });
 
   if (!res.ok) {
@@ -58,52 +32,22 @@ async function authPost<T>(
     throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
   }
 
-  return (await res.json()) as T;
-}
-
-async function authPatch(
-  path: string,
-  token: string,
-  body: unknown,
-): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'PATCH',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-    },
-    body: JSON.stringify(body),
-  });
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => null)) as ApiError | null;
-    throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
-  }
-}
-
-async function authDelete(path: string, token: string): Promise<void> {
-  const res = await fetch(`${API_BASE}${path}`, {
-    method: 'DELETE',
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!res.ok) {
-    const err = (await res.json().catch(() => null)) as ApiError | null;
-    throw new Error(err?.details ?? err?.error ?? `HTTP ${res.status}`);
-  }
+  return (parse ? await res.json() : undefined) as T;
 }
 
 export function fetchRoute(req: RouteRequest): Promise<RouteResponse> {
-  return postJson<RouteResponse>('/api/route', req);
+  return request<RouteResponse>('POST', '/api/route', { body: req });
 }
 
 export function fetchPlaces(chargerIds: string[]): Promise<PlacesResponse> {
-  return postJson<PlacesResponse>('/api/places', { chargerIds });
+  return request<PlacesResponse>('POST', '/api/places', {
+    body: { chargerIds },
+  });
 }
 
 // Favorites
 export function fetchFavorites(token: string): Promise<FavoritesResponse> {
-  return authGet<FavoritesResponse>('/api/favorites', token);
+  return request<FavoritesResponse>('GET', '/api/favorites', { token });
 }
 
 export function addFavorite(
@@ -111,7 +55,7 @@ export function addFavorite(
   type: 'charger' | 'brand',
   id: string,
 ): Promise<void> {
-  return authPost<void>('/api/favorites', token, { type, id });
+  return request<void>('POST', '/api/favorites', { token, body: { type, id } });
 }
 
 export function removeFavorite(
@@ -119,24 +63,33 @@ export function removeFavorite(
   type: 'charger' | 'brand',
   id: string,
 ): Promise<void> {
-  return authDelete(`/api/favorites/${type}/${id}`, token);
+  return request<void>('DELETE', `/api/favorites/${type}/${id}`, {
+    token,
+    parse: false,
+  });
 }
 
 // Saved trips
 export function fetchTrips(token: string): Promise<TripsResponse> {
-  return authGet<TripsResponse>('/api/trips', token);
+  return request<TripsResponse>('GET', '/api/trips', { token });
 }
 
 export function saveTrip(
   token: string,
   name: string,
-  request: RouteRequest,
+  req: RouteRequest,
 ): Promise<void> {
-  return authPost<void>('/api/trips', token, { name, request });
+  return request<void>('POST', '/api/trips', {
+    token,
+    body: { name, request: req },
+  });
 }
 
 export function deleteTrip(token: string, tripId: string): Promise<void> {
-  return authDelete(`/api/trips/${tripId}`, token);
+  return request<void>('DELETE', `/api/trips/${tripId}`, {
+    token,
+    parse: false,
+  });
 }
 
 export function renameTrip(
@@ -144,5 +97,9 @@ export function renameTrip(
   tripId: string,
   name: string,
 ): Promise<void> {
-  return authPatch(`/api/trips/${tripId}`, token, { name });
+  return request<void>('PATCH', `/api/trips/${tripId}`, {
+    token,
+    body: { name },
+    parse: false,
+  });
 }
