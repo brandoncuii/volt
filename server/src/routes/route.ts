@@ -87,6 +87,12 @@ function validate(body: unknown): RouteRequest | string {
     ) {
       return 'restaurantQueries must be an array of strings';
     }
+    if (b.restaurantQueries.length > 5) {
+      return 'restaurantQueries must have at most 5 entries';
+    }
+    if (b.restaurantQueries.some((q) => q.length > 64)) {
+      return 'restaurantQueries entries must be at most 64 characters';
+    }
     restaurantQueries = b.restaurantQueries;
   }
 

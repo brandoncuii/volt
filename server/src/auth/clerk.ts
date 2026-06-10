@@ -1,5 +1,6 @@
 import { verifyToken } from '@clerk/backend';
 import type { Request, Response, NextFunction } from 'express';
+import { ALLOWED_ORIGINS } from '../config.js';
 
 export interface AuthRequest extends Request {
   userId: string;
@@ -28,10 +29,7 @@ export async function requireAuth(
   try {
     const { sub } = await verifyToken(token, {
       secretKey: process.env.CLERK_SECRET_KEY!,
-      authorizedParties: [
-        'https://volt-rust-phi.vercel.app',
-        'http://localhost:5173',
-      ],
+      authorizedParties: ALLOWED_ORIGINS,
     });
     if (!sub) {
       res.status(401).json({ error: 'unauthorized', details: 'Invalid token' });

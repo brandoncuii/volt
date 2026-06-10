@@ -43,6 +43,14 @@ export class VoltStack extends Stack {
       removalPolicy: RemovalPolicy.DESTROY,
     });
 
+    // Single source of truth for browser origins — used for both the API
+    // Gateway CORS preflight and the Lambda's ALLOWED_ORIGINS env var
+    // (Express CORS + Clerk authorizedParties).
+    const allowedOrigins = [
+      'https://volt-rust-phi.vercel.app',
+      'http://localhost:5173',
+    ];
+
     const googleMapsApiKey = process.env.GOOGLE_MAPS_API_KEY;
     if (!googleMapsApiKey) {
       throw new Error(
@@ -86,6 +94,7 @@ export class VoltStack extends Stack {
         USER_DATA_TABLE: userData.tableName,
         GOOGLE_MAPS_API_KEY: googleMapsApiKey,
         CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? '',
+        ALLOWED_ORIGINS: allowedOrigins.join(','),
         // Stay on Haversine in prod for v1: the Distance Matrix path needs
         // a pre-warmed cache to be feasible inside Lambda's response budget.
         // Flip back to 'false' after writing an offline cache-fill script.
@@ -100,7 +109,7 @@ export class VoltStack extends Stack {
 
     const httpApi = new HttpApi(this, 'VoltHttpApi', {
       corsPreflight: {
-        allowOrigins: ['https://volt-rust-phi.vercel.app', 'http://localhost:5173'],
+        allowOrigins: allowedOrigins,
         allowMethods: [
           CorsHttpMethod.GET,
           CorsHttpMethod.POST,

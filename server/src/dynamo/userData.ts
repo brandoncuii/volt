@@ -222,10 +222,13 @@ export async function renameTrip(
   if (!ddbTableName()) {
     const data = loadLocal();
     const trip = data.trips[userId]?.find((t) => t.tripId === tripId);
-    if (trip) {
-      trip.name = name;
-      saveLocal(data);
+    if (!trip) {
+      const err = new Error('trip not found');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
     }
+    trip.name = name;
+    saveLocal(data);
     return;
   }
 
@@ -234,6 +237,8 @@ export async function renameTrip(
       TableName: ddbTableName(),
       Key: { pk: { S: userId }, sk: { S: sk } },
       UpdateExpression: 'SET tripName = :name',
+      // Without this, renaming a nonexistent trip upserts a ghost item.
+      ConditionExpression: 'attribute_exists(pk)',
       ExpressionAttributeValues: { ':name': { S: name } },
     }),
   );

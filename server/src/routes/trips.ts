@@ -97,6 +97,11 @@ tripsRouter.patch('/trips/:tripId', requireAuth, async (req, res: Response) => {
     await renameTrip(userId, tripId, body.name.trim());
     res.status(204).send();
   } catch (e) {
+    if (e instanceof Error && e.name === 'ConditionalCheckFailedException') {
+      const err: ApiError = { error: 'not_found', details: 'trip not found' };
+      res.status(404).json(err);
+      return;
+    }
     const err: ApiError = {
       error: 'trips_failed',
       details: e instanceof Error ? e.message : 'unknown error',
