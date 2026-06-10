@@ -84,8 +84,15 @@ export async function planRoute(
   byId.set(END_ID, endNode);
   for (const c of chargers) byId.set(c.id, c);
 
+  // Neighbor lists depend only on node id (plus prefilterKm and the fixed
+  // candidate list, both constant per planRoute call), so memoize per id —
+  // the same charger is expanded under many state keys.
+  const neighborCache = new Map<string, Supercharger[]>();
+
   function neighbors(node: Supercharger): Supercharger[] {
     if (node.id === END_ID) return [];
+    const cached = neighborCache.get(node.id);
+    if (cached !== undefined) return cached;
     const out: Supercharger[] = [];
     if (haversineKm(node.location, endNode.location) <= prefilterKm) {
       out.push(endNode);
@@ -96,6 +103,7 @@ export async function planRoute(
         out.push(c);
       }
     }
+    neighborCache.set(node.id, out);
     return out;
   }
 
