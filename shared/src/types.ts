@@ -23,6 +23,7 @@ export interface RouteRequest {
   excludeChargerIds?: string[];   // chargers to exclude from the graph
   maxStops?: number;              // cap on the number of charging stops in the result (0-10)
   restaurantBrandIds?: string[];  // when set, server pre-filters chargers to those near these brands
+  restaurantQueries?: string[];   // free-text restaurant names; filter chargers like brands, matched against restaurant names
 }
 
 // One stop along the computed route

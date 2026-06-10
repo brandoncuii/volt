@@ -5,11 +5,24 @@ import { routeRouter } from './routes/route.js';
 import { placesRouter } from './routes/places.js';
 import { favoritesRouter } from './routes/favorites.js';
 import { tripsRouter } from './routes/trips.js';
+import { ALLOWED_ORIGINS } from './config.js';
 
 export function createApp() {
   const app = express();
-  app.use(cors());
+  // Behind API Gateway — trust the first X-Forwarded-For hop so req.ip
+  // (used by the rate limiter) is the client IP, not the gateway's.
+  app.set('trust proxy', 1);
+  app.use(cors({ origin: ALLOWED_ORIGINS }));
   app.use(express.json());
+
+  // Registered before the rate limiter so uptime monitors don't trip it.
+  app.get('/api/health', (_req: Request, res: Response) => {
+    res.json({
+      status: 'ok',
+      service: 'volt-api',
+      timestamp: new Date().toISOString(),
+    });
+  });
 
   const apiLimiter = rateLimit({
     windowMs: 60_000,
@@ -22,14 +35,6 @@ export function createApp() {
     },
   });
   app.use('/api', apiLimiter);
-
-  app.get('/api/health', (_req: Request, res: Response) => {
-    res.json({
-      status: 'ok',
-      service: 'volt-api',
-      timestamp: new Date().toISOString(),
-    });
-  });
 
   app.use('/api', routeRouter);
   app.use('/api', placesRouter);

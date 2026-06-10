@@ -69,6 +69,23 @@ function validate(body: unknown): RouteRequest | string {
     restaurantBrandIds = b.restaurantBrandIds;
   }
 
+  let restaurantQueries: string[] | undefined;
+  if (b.restaurantQueries !== undefined) {
+    if (
+      !Array.isArray(b.restaurantQueries) ||
+      !b.restaurantQueries.every((q): q is string => typeof q === 'string')
+    ) {
+      return 'restaurantQueries must be an array of strings';
+    }
+    if (b.restaurantQueries.length > 5) {
+      return 'restaurantQueries must have at most 5 entries';
+    }
+    if (b.restaurantQueries.some((q) => q.length > 64)) {
+      return 'restaurantQueries entries must be at most 64 characters';
+    }
+    restaurantQueries = b.restaurantQueries;
+  }
+
   return {
     start: b.start,
     end: b.end,
@@ -78,6 +95,7 @@ function validate(body: unknown): RouteRequest | string {
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
     ...(maxStops !== undefined && { maxStops }),
     ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
+    ...(restaurantQueries !== undefined && { restaurantQueries }),
   };
 }
 
@@ -232,5 +250,56 @@ describe('validate', () => {
   it('omits restaurantBrandIds when not provided', () => {
     const result = validate(validBody);
     expect((result as RouteRequest).restaurantBrandIds).toBeUndefined();
+  });
+
+  it('accepts restaurantQueries as an array of strings', () => {
+    const body = { ...validBody, restaurantQueries: ['ramen', 'tacos'] };
+    const result = validate(body);
+    expect((result as RouteRequest).restaurantQueries).toEqual([
+      'ramen',
+      'tacos',
+    ]);
+  });
+
+  it('rejects non-array restaurantQueries', () => {
+    const body = { ...validBody, restaurantQueries: 'ramen' };
+    expect(validate(body)).toBe('restaurantQueries must be an array of strings');
+  });
+
+  it('rejects restaurantQueries with non-string entries', () => {
+    const body = { ...validBody, restaurantQueries: ['ramen', 42] };
+    expect(validate(body)).toBe('restaurantQueries must be an array of strings');
+  });
+
+  it('accepts restaurantQueries at the entry cap', () => {
+    const body = { ...validBody, restaurantQueries: ['a', 'b', 'c', 'd', 'e'] };
+    const result = validate(body);
+    expect(typeof result).toBe('object');
+  });
+
+  it('rejects more than 5 restaurantQueries', () => {
+    const body = {
+      ...validBody,
+      restaurantQueries: ['a', 'b', 'c', 'd', 'e', 'f'],
+    };
+    expect(validate(body)).toBe('restaurantQueries must have at most 5 entries');
+  });
+
+  it('accepts a restaurantQueries entry of exactly 64 characters', () => {
+    const body = { ...validBody, restaurantQueries: ['x'.repeat(64)] };
+    const result = validate(body);
+    expect(typeof result).toBe('object');
+  });
+
+  it('rejects a restaurantQueries entry longer than 64 characters', () => {
+    const body = { ...validBody, restaurantQueries: ['x'.repeat(65)] };
+    expect(validate(body)).toBe(
+      'restaurantQueries entries must be at most 64 characters',
+    );
+  });
+
+  it('omits restaurantQueries when not provided', () => {
+    const result = validate(validBody);
+    expect((result as RouteRequest).restaurantQueries).toBeUndefined();
   });
 });

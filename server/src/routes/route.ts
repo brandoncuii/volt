@@ -1,6 +1,6 @@
 import { Router, Request, Response } from 'express';
 import type { RouteRequest, ApiError } from '@volt/shared';
-import { findBrand } from '@volt/shared';
+import { findBrand, type Brand } from '@volt/shared';
 import { loadSuperchargers } from '../data/loader.js';
 import { planRoute, getLastPlanMetrics } from '../algo/aStar.js';
 import { chargersInCorridor } from '../graph/corridor.js';
@@ -13,6 +13,10 @@ import {
 import { getEdgeStats, resetEdgeStats } from '../graph/edges.js';
 
 export const routeRouter = Router();
+
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
 
 function validate(body: unknown): RouteRequest | string {
   if (!body || typeof body !== 'object') return 'body must be a JSON object';
@@ -75,6 +79,23 @@ function validate(body: unknown): RouteRequest | string {
     restaurantBrandIds = b.restaurantBrandIds;
   }
 
+  let restaurantQueries: string[] | undefined;
+  if (b.restaurantQueries !== undefined) {
+    if (
+      !Array.isArray(b.restaurantQueries) ||
+      !b.restaurantQueries.every((q): q is string => typeof q === 'string')
+    ) {
+      return 'restaurantQueries must be an array of strings';
+    }
+    if (b.restaurantQueries.length > 5) {
+      return 'restaurantQueries must have at most 5 entries';
+    }
+    if (b.restaurantQueries.some((q) => q.length > 64)) {
+      return 'restaurantQueries entries must be at most 64 characters';
+    }
+    restaurantQueries = b.restaurantQueries;
+  }
+
   return {
     start: b.start,
     end: b.end,
@@ -84,6 +105,7 @@ function validate(body: unknown): RouteRequest | string {
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
     ...(maxStops !== undefined && { maxStops }),
     ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
+    ...(restaurantQueries !== undefined && { restaurantQueries }),
   };
 }
 
@@ -109,15 +131,23 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
     chargers = chargersInCorridor(chargers, parsed.start, parsed.end, 1.4);
     const corridorSize = chargers.length;
 
-    if (parsed.restaurantBrandIds && parsed.restaurantBrandIds.length > 0) {
-      const brands = parsed.restaurantBrandIds
+    const brandFilters: Brand[] = [
+      ...(parsed.restaurantBrandIds ?? [])
         .map((id) => findBrand(id))
-        .filter((b): b is NonNullable<typeof b> => b !== undefined);
-      if (brands.length > 0) {
-        const corridor = chargersInCorridor(chargers, parsed.start, parsed.end);
-        chargers = await filterChargersByBrand(corridor, brands);
-        flushPlacesCache();
-      }
+        .filter((b): b is Brand => b !== undefined),
+      ...(parsed.restaurantQueries ?? [])
+        .map((q) => q.trim())
+        .filter((q) => q.length > 0)
+        .map((q) => ({
+          id: `q:${q.toLowerCase()}`,
+          name: q,
+          pattern: new RegExp(escapeRegExp(q), 'i'),
+        })),
+    ];
+    if (brandFilters.length > 0) {
+      const corridor = chargersInCorridor(chargers, parsed.start, parsed.end);
+      chargers = await filterChargersByBrand(corridor, brandFilters);
+      flushPlacesCache();
     }
 
     const result = await planRoute(chargers, parsed);

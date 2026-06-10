@@ -5,6 +5,7 @@ import {
   DynamoDBClient,
   PutItemCommand,
   DeleteItemCommand,
+  UpdateItemCommand,
   QueryCommand,
 } from '@aws-sdk/client-dynamodb';
 import type { Favorite, SavedTrip, RouteRequest } from '@volt/shared';
@@ -207,6 +208,38 @@ export async function deleteTrip(
     new DeleteItemCommand({
       TableName: ddbTableName(),
       Key: { pk: { S: userId }, sk: { S: sk } },
+    }),
+  );
+}
+
+export async function renameTrip(
+  userId: string,
+  tripId: string,
+  name: string,
+): Promise<void> {
+  const sk = `TRIP#${tripId}`;
+
+  if (!ddbTableName()) {
+    const data = loadLocal();
+    const trip = data.trips[userId]?.find((t) => t.tripId === tripId);
+    if (!trip) {
+      const err = new Error('trip not found');
+      err.name = 'ConditionalCheckFailedException';
+      throw err;
+    }
+    trip.name = name;
+    saveLocal(data);
+    return;
+  }
+
+  await getDdb().send(
+    new UpdateItemCommand({
+      TableName: ddbTableName(),
+      Key: { pk: { S: userId }, sk: { S: sk } },
+      UpdateExpression: 'SET tripName = :name',
+      // Without this, renaming a nonexistent trip upserts a ghost item.
+      ConditionExpression: 'attribute_exists(pk)',
+      ExpressionAttributeValues: { ':name': { S: name } },
     }),
   );
 }

@@ -29,6 +29,8 @@ interface Props {
   loading: boolean;
   selectedBrands: Brand[];
   onSelectedBrandsChange: (brands: Brand[]) => void;
+  customTerms: string[];
+  onCustomTermsChange: (terms: string[]) => void;
   onReady?: (ref: { populateAndSubmit: (req: RouteRequest) => void }) => void;
   isFavorite?: (type: 'charger' | 'brand', id: string) => boolean;
   onToggleFavorite?: (type: 'charger' | 'brand', id: string) => void;
@@ -39,6 +41,8 @@ export function RouteForm({
   loading,
   selectedBrands,
   onSelectedBrandsChange,
+  customTerms,
+  onCustomTermsChange,
   onReady,
   isFavorite,
   onToggleFavorite,
@@ -280,6 +284,8 @@ export function RouteForm({
           <BrandFilter
             selected={selectedBrands}
             onChange={onSelectedBrandsChange}
+            customTerms={customTerms}
+            onCustomTermsChange={onCustomTermsChange}
             isFavorite={isFavorite}
             onToggleFavorite={onToggleFavorite}
           />

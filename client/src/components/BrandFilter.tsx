@@ -1,11 +1,15 @@
+import { useState } from 'react';
 import { BRANDS, type Brand } from '@volt/shared';
 import { Label } from '@/components/ui/label';
-import { Heart } from 'lucide-react';
+import { Input } from '@/components/ui/input';
+import { Heart, X } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 interface Props {
   selected: Brand[];
   onChange: (next: Brand[]) => void;
+  customTerms: string[];
+  onCustomTermsChange: (next: string[]) => void;
   isFavorite?: (type: 'charger' | 'brand', id: string) => boolean;
   onToggleFavorite?: (type: 'charger' | 'brand', id: string) => void;
 }
@@ -13,10 +17,13 @@ interface Props {
 export function BrandFilter({
   selected,
   onChange,
+  customTerms,
+  onCustomTermsChange,
   isFavorite,
   onToggleFavorite,
 }: Props) {
   const selectedIds = new Set(selected.map((b) => b.id));
+  const [draft, setDraft] = useState('');
 
   function toggle(brand: Brand) {
     if (selectedIds.has(brand.id)) {
@@ -26,14 +33,32 @@ export function BrandFilter({
     }
   }
 
+  function addTerm() {
+    const term = draft.trim();
+    setDraft('');
+    if (!term) return;
+    // Dedupe case-insensitively against existing terms.
+    if (customTerms.some((t) => t.toLowerCase() === term.toLowerCase())) return;
+    onCustomTermsChange([...customTerms, term]);
+  }
+
+  function removeTerm(term: string) {
+    onCustomTermsChange(customTerms.filter((t) => t !== term));
+  }
+
+  const hasAny = selected.length > 0 || customTerms.length > 0;
+
   return (
     <div className="space-y-2">
       <div className="flex items-center justify-between">
         <Label>Restaurants near stops</Label>
-        {selected.length > 0 && (
+        {hasAny && (
           <button
             type="button"
-            onClick={() => onChange([])}
+            onClick={() => {
+              onChange([]);
+              onCustomTermsChange([]);
+            }}
             className="text-xs text-muted-foreground hover:text-foreground"
           >
             Clear
@@ -81,7 +106,36 @@ export function BrandFilter({
             </div>
           );
         })}
+        {customTerms.map((term) => (
+          <span
+            key={`q:${term}`}
+            className="flex items-center gap-1 px-2.5 py-1 rounded-full text-xs border bg-primary text-primary-foreground border-primary"
+          >
+            {term}
+            <button
+              type="button"
+              onClick={() => removeTerm(term)}
+              className="hover:opacity-70"
+              title="Remove"
+            >
+              <X className="h-3 w-3" />
+            </button>
+          </span>
+        ))}
       </div>
+      <Input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e) => {
+          if (e.key === 'Enter') {
+            e.preventDefault();
+            addTerm();
+          }
+        }}
+        onBlur={addTerm}
+        placeholder="Type a restaurant, e.g. Wendy's"
+        className="h-8 text-xs"
+      />
     </div>
   );
 }
