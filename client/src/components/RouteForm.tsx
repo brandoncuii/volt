@@ -18,7 +18,7 @@ import { findCar, CUSTOM_CAR_ID } from '@/lib/cars';
 import type { PlaceValue } from '@/lib/maps';
 import { miToKm, kmToMi } from '@/lib/units';
 import type { Brand } from '@volt/shared';
-import { MapPin, LoaderCircle } from 'lucide-react';
+import { MapPin, LoaderCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MAX_STOPS_ANY = 'any';
@@ -49,6 +49,11 @@ export function RouteForm({
 }: Props) {
   const [start, setStart] = useState<PlaceValue | null>(null);
   const [end, setEnd] = useState<PlaceValue | null>(null);
+  // Stable keys so removing one waypoint doesn't remount the others.
+  const [waypoints, setWaypoints] = useState<
+    { key: number; value: PlaceValue | null }[]
+  >([]);
+  const wpKeyRef = useRef(0);
   const defaultCar = findCar(DEFAULT_CAR_ID);
   const [carId, setCarId] = useState<string>(DEFAULT_CAR_ID);
   const [vehicleRangeMi, setVehicleRangeMi] = useState(
@@ -61,6 +66,13 @@ export function RouteForm({
   const [startFromLocation, setStartFromLocation] = useState(false);
 
   const canSubmit = start !== null && end !== null && !loading;
+
+  const addWaypoint = () =>
+    setWaypoints((w) => [...w, { key: wpKeyRef.current++, value: null }]);
+  const removeWaypoint = (key: number) =>
+    setWaypoints((w) => w.filter((x) => x.key !== key));
+  const setWaypointValue = (key: number, value: PlaceValue) =>
+    setWaypoints((w) => w.map((x) => (x.key === key ? { ...x, value } : x)));
 
   const handleCarChange = (id: string) => {
     setCarId(id);
@@ -128,6 +140,16 @@ export function RouteForm({
       };
       setStart(startPlace);
       setEnd(endPlace);
+      setWaypoints(
+        (req.waypoints ?? []).map((w) => ({
+          key: wpKeyRef.current++,
+          value: {
+            lat: w.lat,
+            lng: w.lng,
+            description: `${w.lat.toFixed(4)}, ${w.lng.toFixed(4)}`,
+          },
+        })),
+      );
       setVehicleRangeMi(Math.round(kmToMi(req.vehicleRangeKm)));
       setStartBatteryPct(req.startBatteryPct);
       setMinArrivalBatteryPct(req.minArrivalBatteryPct);
@@ -152,9 +174,14 @@ export function RouteForm({
     if (!start || !end) return;
     const parsedMaxStops =
       maxStops === MAX_STOPS_ANY ? undefined : Number(maxStops);
+    const wp = waypoints
+      .map((w) => w.value)
+      .filter((v): v is PlaceValue => v !== null)
+      .map((v) => ({ lat: v.lat, lng: v.lng }));
     onSubmit({
       start: { lat: start.lat, lng: start.lng },
       end: { lat: end.lat, lng: end.lng },
+      ...(wp.length > 0 && { waypoints: wp }),
       vehicleRangeKm: miToKm(vehicleRangeMi),
       startBatteryPct,
       minArrivalBatteryPct,
@@ -204,6 +231,37 @@ export function RouteForm({
               </p>
             )}
           </div>
+
+          {waypoints.map((w, i) => (
+            <div key={w.key} className="space-y-2">
+              <div className="flex items-center justify-between">
+                <Label htmlFor={`waypoint-${w.key}`}>Stop {i + 1}</Label>
+                <button
+                  type="button"
+                  onClick={() => removeWaypoint(w.key)}
+                  className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"
+                >
+                  <X className="h-3 w-3" />
+                  Remove
+                </button>
+              </div>
+              <PlacesAutocompleteInput
+                id={`waypoint-${w.key}`}
+                label=""
+                placeholder="Add a stop along the way"
+                onChange={(place) => setWaypointValue(w.key, place)}
+              />
+            </div>
+          ))}
+
+          <button
+            type="button"
+            onClick={addWaypoint}
+            className="flex items-center gap-1 text-sm text-muted-foreground hover:text-foreground"
+          >
+            <Plus className="h-4 w-4" />
+            Add stop
+          </button>
 
           <PlacesAutocompleteInput
             id="end"

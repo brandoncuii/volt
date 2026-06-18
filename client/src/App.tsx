@@ -54,6 +54,7 @@ function App() {
   const [endpoints, setEndpoints] = useState<{
     start: { lat: number; lng: number };
     end: { lat: number; lng: number };
+    waypoints?: { lat: number; lng: number }[];
   } | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Brand[]>([]);
   const [customTerms, setCustomTerms] = useState<string[]>([]);
@@ -101,7 +102,7 @@ function App() {
     setResult(null);
     setRestaurants(null);
     setPartialFit(false);
-    setEndpoints({ start: req.start, end: req.end });
+    setEndpoints({ start: req.start, end: req.end, waypoints: req.waypoints });
     setLastRequest(req);
 
     // Update URL hash
@@ -261,6 +262,7 @@ function App() {
               result={result}
               start={endpoints?.start ?? null}
               end={endpoints?.end ?? null}
+              waypoints={endpoints?.waypoints}
             />
           ) : (
             <div className="h-full w-full grid place-items-center text-muted-foreground text-sm">

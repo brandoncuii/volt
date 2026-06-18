@@ -17,6 +17,7 @@ export interface Supercharger {
 export interface RouteRequest {
   start: { lat: number; lng: number };
   end: { lat: number; lng: number };
+  waypoints?: { lat: number; lng: number }[]; // ordered intermediate destinations to pass through (no charging at a waypoint)
   vehicleRangeKm: number;        // max range on full charge, e.g. 400
   startBatteryPct: number;       // 0-100, e.g. 90
   minArrivalBatteryPct: number;  // 0-100, e.g. 10 — must arrive with at least this much

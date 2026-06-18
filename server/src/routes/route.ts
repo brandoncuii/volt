@@ -1,5 +1,5 @@
 import { Router, Request, Response } from 'express';
-import type { RouteRequest, ApiError } from '@volt/shared';
+import type { RouteRequest, ApiError, Supercharger } from '@volt/shared';
 import { findBrand, type Brand } from '@volt/shared';
 import { loadSuperchargers } from '../data/loader.js';
 import { planRoute, getLastPlanMetrics } from '../algo/aStar.js';
@@ -29,6 +29,17 @@ function validate(body: unknown): RouteRequest | string {
 
   if (!isLatLng(b.start)) return 'start must be { lat, lng }';
   if (!isLatLng(b.end)) return 'end must be { lat, lng }';
+
+  let waypoints: { lat: number; lng: number }[] | undefined;
+  if (b.waypoints !== undefined) {
+    if (!Array.isArray(b.waypoints) || !b.waypoints.every(isLatLng)) {
+      return 'waypoints must be an array of { lat, lng }';
+    }
+    if (b.waypoints.length > 5) {
+      return 'waypoints must have at most 5 entries';
+    }
+    waypoints = b.waypoints;
+  }
   if (typeof b.vehicleRangeKm !== 'number' || b.vehicleRangeKm <= 0)
     return 'vehicleRangeKm must be a positive number';
   if (
@@ -102,6 +113,7 @@ function validate(body: unknown): RouteRequest | string {
     vehicleRangeKm: b.vehicleRangeKm,
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
+    ...(waypoints !== undefined && { waypoints }),
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
     ...(maxStops !== undefined && { maxStops }),
     ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
@@ -127,8 +139,31 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
       ? all
       : all.filter((c) => !excluded.has(c.id));
 
+    // With waypoints the candidate set is the union of each leg's corridor,
+    // so chargers near a detour aren't dropped. No waypoints → single ellipse.
+    const points = [parsed.start, ...(parsed.waypoints ?? []), parsed.end];
+    const unionCorridor = (
+      src: Supercharger[],
+      factor?: number,
+    ): Supercharger[] => {
+      if (points.length === 2) {
+        return chargersInCorridor(src, points[0]!, points[1]!, factor);
+      }
+      const seen = new Set<string>();
+      const out: Supercharger[] = [];
+      for (let i = 0; i < points.length - 1; i++) {
+        for (const c of chargersInCorridor(src, points[i]!, points[i + 1]!, factor)) {
+          if (!seen.has(c.id)) {
+            seen.add(c.id);
+            out.push(c);
+          }
+        }
+      }
+      return out;
+    };
+
     const totalChargers = chargers.length;
-    chargers = chargersInCorridor(chargers, parsed.start, parsed.end, 1.4);
+    chargers = unionCorridor(chargers, 1.4);
     const corridorSize = chargers.length;
 
     const brandFilters: Brand[] = [
@@ -145,7 +180,7 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
         })),
     ];
     if (brandFilters.length > 0) {
-      const corridor = chargersInCorridor(chargers, parsed.start, parsed.end);
+      const corridor = unionCorridor(chargers);
       chargers = await filterChargersByBrand(corridor, brandFilters);
       flushPlacesCache();
     }

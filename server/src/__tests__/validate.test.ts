@@ -19,6 +19,18 @@ function validate(body: unknown): RouteRequest | string {
 
   if (!isLatLng(b.start)) return 'start must be { lat, lng }';
   if (!isLatLng(b.end)) return 'end must be { lat, lng }';
+
+  let waypoints: { lat: number; lng: number }[] | undefined;
+  if (b.waypoints !== undefined) {
+    if (!Array.isArray(b.waypoints) || !b.waypoints.every(isLatLng)) {
+      return 'waypoints must be an array of { lat, lng }';
+    }
+    if (b.waypoints.length > 5) {
+      return 'waypoints must have at most 5 entries';
+    }
+    waypoints = b.waypoints;
+  }
+
   if (typeof b.vehicleRangeKm !== 'number' || b.vehicleRangeKm <= 0)
     return 'vehicleRangeKm must be a positive number';
   if (
@@ -92,6 +104,7 @@ function validate(body: unknown): RouteRequest | string {
     vehicleRangeKm: b.vehicleRangeKm,
     startBatteryPct: b.startBatteryPct,
     minArrivalBatteryPct: b.minArrivalBatteryPct,
+    ...(waypoints !== undefined && { waypoints }),
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
     ...(maxStops !== undefined && { maxStops }),
     ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
@@ -194,6 +207,40 @@ describe('validate', () => {
   it('omits excludeChargerIds when not provided', () => {
     const result = validate(validBody);
     expect((result as RouteRequest).excludeChargerIds).toBeUndefined();
+  });
+
+  it('accepts a valid waypoints array', () => {
+    const body = {
+      ...validBody,
+      waypoints: [{ lat: 36.74, lng: -119.79 }],
+    };
+    const result = validate(body);
+    expect((result as RouteRequest).waypoints).toEqual([
+      { lat: 36.74, lng: -119.79 },
+    ]);
+  });
+
+  it('rejects non-array waypoints', () => {
+    const body = { ...validBody, waypoints: { lat: 36.74, lng: -119.79 } };
+    expect(validate(body)).toBe('waypoints must be an array of { lat, lng }');
+  });
+
+  it('rejects waypoints with a malformed entry', () => {
+    const body = { ...validBody, waypoints: [{ lat: 36.74 }] };
+    expect(validate(body)).toBe('waypoints must be an array of { lat, lng }');
+  });
+
+  it('rejects more than 5 waypoints', () => {
+    const body = {
+      ...validBody,
+      waypoints: Array.from({ length: 6 }, () => ({ lat: 36, lng: -119 })),
+    };
+    expect(validate(body)).toBe('waypoints must have at most 5 entries');
+  });
+
+  it('omits waypoints when not provided', () => {
+    const result = validate(validBody);
+    expect((result as RouteRequest).waypoints).toBeUndefined();
   });
 
   it('accepts a valid maxStops value', () => {

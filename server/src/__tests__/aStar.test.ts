@@ -213,6 +213,58 @@ describe('planRoute', () => {
     }
   });
 
+  it('routes through a waypoint, adding distance vs the direct route', async () => {
+    // Large range so charging never gates feasibility — this isolates the
+    // waypoint routing itself.
+    const base = {
+      start: { lat: 34.0522, lng: -118.2437 }, // LA
+      end: { lat: 37.7749, lng: -122.4194 }, // SF
+      vehicleRangeKm: 2000,
+      startBatteryPct: 100,
+      minArrivalBatteryPct: 10,
+    } satisfies RouteRequest;
+
+    const direct = await planRoute(chargers, base);
+    const viaVegas = await planRoute(chargers, {
+      ...base,
+      waypoints: [{ lat: 36.1699, lng: -115.1398 }], // Las Vegas — off the I-5 line
+    });
+
+    // The mandatory eastward detour must lengthen the trip.
+    expect(viaVegas.totalDistanceKm).toBeGreaterThan(direct.totalDistanceKm);
+    // Waypoints are destinations, not charging stops — they never appear as stops.
+    expect(viaVegas.stops.every((s) => !s.charger.id.startsWith('__wp__'))).toBe(true);
+  });
+
+  it('keeps waypoints in the entered order', async () => {
+    // Two waypoints near Fresno and Modesto; entered Fresno-first matches the
+    // south→north drive, so the route is shorter than entering them reversed.
+    const base = {
+      start: { lat: 34.0522, lng: -118.2437 }, // LA
+      end: { lat: 37.7749, lng: -122.4194 }, // SF
+      vehicleRangeKm: 2000,
+      startBatteryPct: 100,
+      minArrivalBatteryPct: 10,
+    } satisfies RouteRequest;
+
+    const inOrder = await planRoute(chargers, {
+      ...base,
+      waypoints: [
+        { lat: 36.7378, lng: -119.7871 }, // Fresno (south)
+        { lat: 37.6391, lng: -120.9969 }, // Modesto (north)
+      ],
+    });
+    const reversed = await planRoute(chargers, {
+      ...base,
+      waypoints: [
+        { lat: 37.6391, lng: -120.9969 }, // Modesto first — forces backtracking
+        { lat: 36.7378, lng: -119.7871 }, // Fresno
+      ],
+    });
+
+    expect(reversed.totalDistanceKm).toBeGreaterThan(inOrder.totalDistanceKm);
+  });
+
   it('state space sanity: SoC buckets increase expansions moderately', async () => {
     const req: RouteRequest = {
       start: { lat: 34.0522, lng: -118.2437 },  // LA
