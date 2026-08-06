@@ -19,6 +19,13 @@ const MAX_DEPARTURE_SOC = 95; // charging above 95% is extremely slow
 
 const START_ID = '__start__';
 const END_ID = '__end__';
+const WP_PREFIX = '__wp__'; // waypoint node ids: __wp__0, __wp__1, …
+
+// Start and waypoints can't charge: start is the driver's origin, a waypoint
+// is a destination they pass through (not a charger).
+function canCharge(id: string): boolean {
+  return id !== START_ID && id !== END_ID && !id.startsWith(WP_PREFIX);
+}
 
 interface EdgeRecord {
   prevKey: string;
@@ -33,8 +40,13 @@ function socBucket(pct: number): number {
   return Math.floor(pct / SOC_BUCKET_SIZE) * SOC_BUCKET_SIZE;
 }
 
-function makeKey(id: string, stopCount: number, soc: number): string {
-  return `${id}#${stopCount}#${socBucket(soc)}`;
+function makeKey(
+  id: string,
+  stopCount: number,
+  soc: number,
+  wpIndex: number,
+): string {
+  return `${id}#${stopCount}#${socBucket(soc)}#${wpIndex}`;
 }
 
 export interface PlanMetrics {
@@ -47,9 +59,19 @@ export function getLastPlanMetrics(): PlanMetrics {
   return lastMetrics;
 }
 
-function parseKey(key: string): { id: string; stopCount: number; soc: number } {
+function parseKey(key: string): {
+  id: string;
+  stopCount: number;
+  soc: number;
+  wpIndex: number;
+} {
   const parts = key.split('#');
-  return { id: parts[0]!, stopCount: Number(parts[1]!), soc: Number(parts[2]!) };
+  return {
+    id: parts[0]!,
+    stopCount: Number(parts[1]!),
+    soc: Number(parts[2]!),
+    wpIndex: Number(parts[3]!),
+  };
 }
 
 export async function planRoute(
@@ -79,24 +101,48 @@ export async function planRoute(
     powerKW: 250,
   };
 
+  // Ordered intermediate destinations become forced, non-charging nodes.
+  const wpNodes: Supercharger[] = (req.waypoints ?? []).map((w, i) => ({
+    id: `${WP_PREFIX}${i}`,
+    name: `Waypoint ${i + 1}`,
+    location: w,
+    address: '',
+    stallCount: 0,
+    powerKW: 0,
+  }));
+  const numWaypoints = wpNodes.length;
+
   const byId = new Map<string, Supercharger>();
   byId.set(START_ID, startNode);
   byId.set(END_ID, endNode);
+  for (const wp of wpNodes) byId.set(wp.id, wp);
   for (const c of chargers) byId.set(c.id, c);
 
-  // Neighbor lists depend only on node id (plus prefilterKm and the fixed
-  // candidate list, both constant per planRoute call), so memoize per id —
-  // the same charger is expanded under many state keys.
+  // Straight-line lower bound on remaining travel time: from `loc`, through
+  // every not-yet-visited waypoint in order, to the end. Admissible because
+  // the waypoints are mandatory, so the route is at least this long.
+  function heuristicMin(loc: { lat: number; lng: number }, wpIndex: number): number {
+    let dist = 0;
+    let from = loc;
+    for (let k = wpIndex; k < numWaypoints; k++) {
+      dist += haversineKm(from, wpNodes[k]!.location);
+      from = wpNodes[k]!.location;
+    }
+    dist += haversineKm(from, endNode.location);
+    return (dist / AVG_SPEED_KMH) * 60;
+  }
+
+  // Charger neighbor lists depend only on node id (prefilterKm and the
+  // candidate list are constant per call), so memoize per id — the same
+  // charger is expanded under many state keys. End and the next waypoint are
+  // appended per-expansion since they depend on how many waypoints are left.
   const neighborCache = new Map<string, Supercharger[]>();
 
-  function neighbors(node: Supercharger): Supercharger[] {
+  function chargerNeighbors(node: Supercharger): Supercharger[] {
     if (node.id === END_ID) return [];
     const cached = neighborCache.get(node.id);
     if (cached !== undefined) return cached;
     const out: Supercharger[] = [];
-    if (haversineKm(node.location, endNode.location) <= prefilterKm) {
-      out.push(endNode);
-    }
     for (const c of chargers) {
       if (c.id === node.id) continue;
       if (haversineKm(node.location, c.location) <= prefilterKm) {
@@ -112,7 +158,7 @@ export async function planRoute(
   const arrivalBattery = new Map<string, number>();
   const edgeIn = new Map<string, EdgeRecord>();
 
-  const startKey = makeKey(START_ID, 0, req.startBatteryPct);
+  const startKey = makeKey(START_ID, 0, req.startBatteryPct, 0);
   heap.push(startKey, 0);
   gScore.set(startKey, 0);
   arrivalBattery.set(startKey, req.startBatteryPct);
@@ -126,7 +172,11 @@ export async function planRoute(
     visited.add(currentKey);
     expansions++;
 
-    const { id: currentId, stopCount: currentStopCount } = parseKey(currentKey);
+    const {
+      id: currentId,
+      stopCount: currentStopCount,
+      wpIndex: currentWpIndex,
+    } = parseKey(currentKey);
 
     if (currentId === END_ID) {
       flushEdgeCache();
@@ -137,14 +187,30 @@ export async function planRoute(
     const current = byId.get(currentId)!;
     const currentG = gScore.get(currentKey)!;
     const currentBattery = arrivalBattery.get(currentKey)!;
+    const currentCanCharge = canCharge(currentId);
 
-    for (const nb of neighbors(current)) {
+    // Candidates: all in-range chargers, plus either the next mandatory
+    // waypoint (in order) or the end once every waypoint has been visited.
+    const candidates = [...chargerNeighbors(current)];
+    if (currentWpIndex < numWaypoints) {
+      const nextWp = wpNodes[currentWpIndex]!;
+      if (haversineKm(current.location, nextWp.location) <= prefilterKm) {
+        candidates.push(nextWp);
+      }
+    } else if (haversineKm(current.location, endNode.location) <= prefilterKm) {
+      candidates.push(endNode);
+    }
+
+    for (const nb of candidates) {
       const isEnd = nb.id === END_ID;
+      const isWaypoint = nb.id.startsWith(WP_PREFIX);
+      const newWpIndex = isWaypoint ? currentWpIndex + 1 : currentWpIndex;
+      // Only real charger stops count toward maxStops.
       const newStopCount = trackStops
-        ? (isEnd ? currentStopCount : currentStopCount + 1)
+        ? (isEnd || isWaypoint ? currentStopCount : currentStopCount + 1)
         : 0;
 
-      if (trackStops && !isEnd && newStopCount > maxStops) continue;
+      if (trackStops && !isEnd && !isWaypoint && newStopCount > maxStops) continue;
 
       const edge = await getEdgeWeight(current, nb);
 
@@ -160,8 +226,8 @@ export async function planRoute(
       // Build list of departure SoCs to evaluate
       const departureSoCs: number[] = [];
 
-      if (currentId === START_ID) {
-        // Can't charge at start — single option
+      if (!currentCanCharge) {
+        // Start or waypoint — no charging possible, single option.
         if (currentBattery >= requiredDeparture) {
           departureSoCs.push(currentBattery);
         }
@@ -170,7 +236,9 @@ export async function planRoute(
         const effMin = Math.max(requiredDeparture, currentBattery);
         if (effMin <= 100) departureSoCs.push(effMin);
       } else {
-        // Enumerate feasible departure SoCs at this charger
+        // Charger → charger or charger → waypoint: enumerate feasible
+        // departure SoCs. The high-SoC options let A* charge more here so a
+        // following waypoint (where it can't charge) stays reachable.
         const effMin = Math.max(requiredDeparture, currentBattery);
         if (effMin <= 100) {
           departureSoCs.push(effMin);
@@ -182,8 +250,7 @@ export async function planRoute(
         }
       }
 
-      const h =
-        (haversineKm(nb.location, endNode.location) / AVG_SPEED_KMH) * 60;
+      const h = heuristicMin(nb.location, newWpIndex);
 
       for (const depSoC of departureSoCs) {
         const chargingMin = depSoC > currentBattery
@@ -197,7 +264,7 @@ export async function planRoute(
         const arrival = depSoC - energyPct;
         const tentativeG = currentG + chargingMin + edge.drivingTimeMin;
 
-        const nbKey = makeKey(nb.id, newStopCount, arrival);
+        const nbKey = makeKey(nb.id, newStopCount, arrival, newWpIndex);
         const prevG = gScore.get(nbKey);
         if (prevG !== undefined && tentativeG >= prevG) continue;
 
@@ -256,7 +323,7 @@ function reconstruct(
     // prev is the virtual start.
     const prevKey = rec.prevKey;
     const { id: prevId } = parseKey(prevKey);
-    if (prevId !== START_ID) {
+    if (prevId !== START_ID && !prevId.startsWith(WP_PREFIX)) {
       const prevCharger = byId.get(prevId)!;
       const prevArrival = edgeIn.get(prevKey)!;
       stops.push({

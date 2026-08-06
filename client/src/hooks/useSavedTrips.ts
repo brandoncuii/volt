@@ -18,22 +18,19 @@ export function useSavedTrips({
 }: UseSavedTripsOptions) {
   const [trips, setTrips] = useState<SavedTrip[]>([]);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
     const load = async () => {
       setLoading(true);
-      setError(null);
       try {
         const token = await getToken();
         if (!token || cancelled) return;
         const data = await fetchTrips(token);
         if (!cancelled) setTrips(data);
-      } catch (e) {
-        if (!cancelled)
-          setError(e instanceof Error ? e.message : 'Failed to load trips');
+      } catch {
+        // Silently fail — trips stay empty
       } finally {
         if (!cancelled) setLoading(false);
       }
@@ -111,7 +108,6 @@ export function useSavedTrips({
   return {
     trips: effectiveTrips,
     loading,
-    error,
     saveTrip: saveTripFn,
     deleteTrip: deleteTripFn,
     renameTrip: renameTripFn,

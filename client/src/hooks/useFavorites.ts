@@ -13,25 +13,18 @@ interface UseFavoritesOptions {
 
 export function useFavorites({ isSignedIn, getToken }: UseFavoritesOptions) {
   const [favorites, setFavorites] = useState<Favorite[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     if (!isSignedIn) return;
     let cancelled = false;
     const load = async () => {
-      setLoading(true);
-      setError(null);
       try {
         const token = await getToken();
         if (!token || cancelled) return;
         const data = await fetchFavorites(token);
         if (!cancelled) setFavorites(data);
-      } catch (e) {
-        if (!cancelled)
-          setError(e instanceof Error ? e.message : 'Failed to load favorites');
-      } finally {
-        if (!cancelled) setLoading(false);
+      } catch {
+        // Silently fail — favorites stay empty
       }
     };
     void load();
@@ -96,8 +89,6 @@ export function useFavorites({ isSignedIn, getToken }: UseFavoritesOptions) {
 
   return {
     favorites: effectiveFavorites,
-    loading,
-    error,
     addFavorite,
     removeFavorite,
     isFavorite: isFavoriteCheck,

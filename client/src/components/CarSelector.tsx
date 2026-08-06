@@ -9,7 +9,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Label } from '@/components/ui/label';
-import { CARS, CUSTOM_CAR_ID, carsByManufacturer } from '@/lib/cars';
+import { CUSTOM_CAR_ID, carsByManufacturer } from '@/lib/cars';
 
 interface Props {
   value: string;
@@ -47,6 +47,3 @@ export function CarSelector({ value, onChange }: Props) {
     </div>
   );
 }
-
-// Re-export so callers don't need a second import to seed default state.
-export { CARS };
