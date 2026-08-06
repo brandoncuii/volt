@@ -192,7 +192,7 @@ function App() {
         <Zap className="h-5 w-5 text-yellow-500 fill-yellow-500" />
         <h1 className="text-lg font-semibold">Volt</h1>
         <span className="text-sm text-muted-foreground ml-2">
-          EV trip planner — US Superchargers
+          Long distance trip planner for electric vehicles
         </span>
         <div className="ml-auto flex items-center gap-2">
           {clerkReady && isSignedIn && (
