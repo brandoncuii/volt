@@ -47,6 +47,7 @@ export class VoltStack extends Stack {
     // Gateway CORS preflight and the Lambda's ALLOWED_ORIGINS env var
     // (Express CORS + Clerk authorizedParties).
     const allowedOrigins = [
+      'https://volt.brandoncui.com',
       'https://volt-rust-phi.vercel.app',
       'http://localhost:5173',
     ];
