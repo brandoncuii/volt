@@ -136,6 +136,10 @@ export class VoltStack extends Stack {
       value: edgeCache.tableName,
     });
 
+    new CfnOutput(this, 'PlacesCacheTableName', {
+      value: placesCache.tableName,
+    });
+
     new CfnOutput(this, 'UserDataTableName', {
       value: userData.tableName,
     });

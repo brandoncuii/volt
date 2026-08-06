@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import type { Supercharger, RouteRequest } from '@volt/shared';
 import { planRoute, getLastPlanMetrics } from '../algo/aStar.js';
 
