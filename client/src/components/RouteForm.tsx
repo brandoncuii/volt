@@ -2,6 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react';
 import type { RouteRequest } from '@volt/shared';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
+import { Input } from '@/components/ui/input';
 import { Slider } from '@/components/ui/slider';
 import { Card, CardContent, CardHeader, CardTitle } from '@/components/ui/card';
 import {
@@ -23,7 +24,18 @@ import { toast } from 'sonner';
 
 const MAX_STOPS_ANY = 'any';
 const MAX_STOPS_FEWEST = 'fewest';
+const MAX_STOPS_CUSTOM = 'custom';
+// Mirrors the server's maxStops validation range.
+const MAX_STOPS_LIMIT = 10;
 const DEFAULT_CAR_ID = 'tesla-model-y-lr';
+
+// Returns undefined when the custom field isn't a usable number, which submits
+// as "no cap" rather than rejecting the whole route request.
+function parseCustomStops(raw: string): number | undefined {
+  const n = Number(raw);
+  if (raw.trim() === '' || !Number.isFinite(n)) return undefined;
+  return Math.min(MAX_STOPS_LIMIT, Math.max(0, Math.round(n)));
+}
 
 interface Props {
   onSubmit: (req: RouteRequest) => void;
@@ -63,6 +75,7 @@ export function RouteForm({
   const [startBatteryPct, setStartBatteryPct] = useState(90);
   const [minArrivalBatteryPct, setMinArrivalBatteryPct] = useState(10);
   const [maxStops, setMaxStops] = useState<string>(MAX_STOPS_ANY);
+  const [customMaxStops, setCustomMaxStops] = useState<string>('5');
   const [locating, setLocating] = useState(false);
   const [startFromLocation, setStartFromLocation] = useState(false);
 
@@ -157,7 +170,13 @@ export function RouteForm({
       if (req.minimizeStops) {
         setMaxStops(MAX_STOPS_FEWEST);
       } else if (req.maxStops !== undefined) {
-        setMaxStops(String(req.maxStops));
+        // Only 1-4 have preset options; anything else restores as custom.
+        if (req.maxStops >= 1 && req.maxStops <= 4) {
+          setMaxStops(String(req.maxStops));
+        } else {
+          setMaxStops(MAX_STOPS_CUSTOM);
+          setCustomMaxStops(String(req.maxStops));
+        }
       } else {
         setMaxStops(MAX_STOPS_ANY);
       }
@@ -177,7 +196,11 @@ export function RouteForm({
     if (!start || !end) return;
     const minimizeStops = maxStops === MAX_STOPS_FEWEST;
     const parsedMaxStops =
-      maxStops === MAX_STOPS_ANY || minimizeStops ? undefined : Number(maxStops);
+      maxStops === MAX_STOPS_ANY || minimizeStops
+        ? undefined
+        : maxStops === MAX_STOPS_CUSTOM
+          ? parseCustomStops(customMaxStops)
+          : Number(maxStops);
     const wp = waypoints
       .map((w) => w.value)
       .filter((v): v is PlaceValue => v !== null)
@@ -341,8 +364,21 @@ export function RouteForm({
                 <SelectItem value="2">At most 2</SelectItem>
                 <SelectItem value="3">At most 3</SelectItem>
                 <SelectItem value="4">At most 4</SelectItem>
+                <SelectItem value={MAX_STOPS_CUSTOM}>Custom…</SelectItem>
               </SelectContent>
             </Select>
+            {maxStops === MAX_STOPS_CUSTOM && (
+              <Input
+                type="number"
+                min={0}
+                max={MAX_STOPS_LIMIT}
+                step={1}
+                value={customMaxStops}
+                onChange={(e) => setCustomMaxStops(e.target.value)}
+                aria-label={`At most how many stops (0-${MAX_STOPS_LIMIT})`}
+                placeholder={`At most … (0-${MAX_STOPS_LIMIT})`}
+              />
+            )}
           </div>
 
           <BrandFilter
