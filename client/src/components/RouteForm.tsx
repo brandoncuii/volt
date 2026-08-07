@@ -22,6 +22,7 @@ import { MapPin, LoaderCircle, Plus, X } from 'lucide-react';
 import { toast } from 'sonner';
 
 const MAX_STOPS_ANY = 'any';
+const MAX_STOPS_FEWEST = 'fewest';
 const DEFAULT_CAR_ID = 'tesla-model-y-lr';
 
 interface Props {
@@ -153,7 +154,9 @@ export function RouteForm({
       setVehicleRangeMi(Math.round(kmToMi(req.vehicleRangeKm)));
       setStartBatteryPct(req.startBatteryPct);
       setMinArrivalBatteryPct(req.minArrivalBatteryPct);
-      if (req.maxStops !== undefined) {
+      if (req.minimizeStops) {
+        setMaxStops(MAX_STOPS_FEWEST);
+      } else if (req.maxStops !== undefined) {
         setMaxStops(String(req.maxStops));
       } else {
         setMaxStops(MAX_STOPS_ANY);
@@ -172,8 +175,9 @@ export function RouteForm({
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     if (!start || !end) return;
+    const minimizeStops = maxStops === MAX_STOPS_FEWEST;
     const parsedMaxStops =
-      maxStops === MAX_STOPS_ANY ? undefined : Number(maxStops);
+      maxStops === MAX_STOPS_ANY || minimizeStops ? undefined : Number(maxStops);
     const wp = waypoints
       .map((w) => w.value)
       .filter((v): v is PlaceValue => v !== null)
@@ -186,6 +190,7 @@ export function RouteForm({
       startBatteryPct,
       minArrivalBatteryPct,
       ...(parsedMaxStops !== undefined && { maxStops: parsedMaxStops }),
+      ...(minimizeStops && { minimizeStops: true }),
     });
   };
 
@@ -324,17 +329,18 @@ export function RouteForm({
           </div>
 
           <div className="space-y-2">
-            <Label htmlFor="max-stops">Max stops</Label>
+            <Label htmlFor="max-stops">Charging stops</Label>
             <Select value={maxStops} onValueChange={setMaxStops}>
               <SelectTrigger id="max-stops" className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value={MAX_STOPS_ANY}>Any</SelectItem>
-                <SelectItem value="1">1</SelectItem>
-                <SelectItem value="2">2</SelectItem>
-                <SelectItem value="3">3</SelectItem>
-                <SelectItem value="4">4</SelectItem>
+                <SelectItem value={MAX_STOPS_ANY}>Any (fastest trip)</SelectItem>
+                <SelectItem value={MAX_STOPS_FEWEST}>Fewest possible</SelectItem>
+                <SelectItem value="1">At most 1</SelectItem>
+                <SelectItem value="2">At most 2</SelectItem>
+                <SelectItem value="3">At most 3</SelectItem>
+                <SelectItem value="4">At most 4</SelectItem>
               </SelectContent>
             </Select>
           </div>

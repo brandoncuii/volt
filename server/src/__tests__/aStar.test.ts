@@ -265,6 +265,56 @@ describe('planRoute', () => {
     expect(reversed.totalDistanceKm).toBeGreaterThan(inOrder.totalDistanceKm);
   });
 
+  describe('minimizeStops', () => {
+    // Straight north-south line (lng -118). Positions are chosen in
+    // "effective km" (haversine × 1.2 detour): slow charger at 200, fast
+    // charger at 250, end at 400. With 500 km range and 55% start battery:
+    // - direct (400 km = 80%) is infeasible from 55%,
+    // - the fast charger alone (250 km = 50% + 10% buffer) is out of reach,
+    // - one stop at the slow 50 kW charger works but charges slowly,
+    // - slow + fast (short top-up at each) is the fastest option.
+    const slowFast: Supercharger[] = [
+      makeCharger('slow-mid', 35.4989, -118, 50),
+      makeCharger('fast-late', 35.8737, -118, 250),
+    ];
+    const req: RouteRequest = {
+      start: { lat: 34, lng: -118 },
+      end: { lat: 36.9979, lng: -118 },
+      vehicleRangeKm: 500,
+      startBatteryPct: 55,
+      minArrivalBatteryPct: 10,
+    };
+
+    it('default objective picks the faster two-stop route', async () => {
+      const fastest = await planRoute(slowFast, req);
+      expect(fastest.stops).toHaveLength(2);
+    });
+
+    it('minimizeStops trades time for the single-stop route', async () => {
+      const fastest = await planRoute(slowFast, req);
+      const fewest = await planRoute(slowFast, { ...req, minimizeStops: true });
+      expect(fewest.stops).toHaveLength(1);
+      expect(fewest.stops[0]!.charger.id).toBe('slow-mid');
+      // Fewer stops costs trip time — that's the requested tradeoff.
+      expect(fewest.totalTripTimeMin).toBeGreaterThan(fastest.totalTripTimeMin);
+      // Stop penalties must not leak into the reported totals.
+      expect(fewest.totalTripTimeMin).toBeLessThan(1000);
+      expect(fewest.totalTripTimeMin).toBeCloseTo(
+        fewest.totalDrivingTimeMin + fewest.totalChargingTimeMin,
+        1,
+      );
+    });
+
+    it('still respects maxStops combined with minimizeStops', async () => {
+      const fewest = await planRoute(slowFast, {
+        ...req,
+        minimizeStops: true,
+        maxStops: 2,
+      });
+      expect(fewest.stops).toHaveLength(1);
+    });
+  });
+
   it('state space sanity: SoC buckets increase expansions moderately', async () => {
     const req: RouteRequest = {
       start: { lat: 34.0522, lng: -118.2437 },  // LA

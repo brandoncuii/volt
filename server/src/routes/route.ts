@@ -93,6 +93,14 @@ function validate(body: unknown): RouteRequest | string {
     maxStops = b.maxStops;
   }
 
+  let minimizeStops: boolean | undefined;
+  if (b.minimizeStops !== undefined) {
+    if (typeof b.minimizeStops !== 'boolean') {
+      return 'minimizeStops must be a boolean';
+    }
+    minimizeStops = b.minimizeStops;
+  }
+
   let restaurantBrandIds: string[] | undefined;
   if (b.restaurantBrandIds !== undefined) {
     if (
@@ -130,6 +138,7 @@ function validate(body: unknown): RouteRequest | string {
     ...(waypoints !== undefined && { waypoints }),
     ...(excludeChargerIds !== undefined && { excludeChargerIds }),
     ...(maxStops !== undefined && { maxStops }),
+    ...(minimizeStops !== undefined && { minimizeStops }),
     ...(restaurantBrandIds !== undefined && { restaurantBrandIds }),
     ...(restaurantQueries !== undefined && { restaurantQueries }),
   };

@@ -31,6 +31,11 @@ const AVG_SPEED_KMH = 88; // for the A* heuristic
 export const RANGE_PREFILTER_FACTOR = 0.9; // skip edges Haversine-close to the range limit
 const SOC_BUCKET_SIZE = 5; // 5% granularity → 20 buckets
 const MAX_DEPARTURE_SOC = 95; // charging above 95% is extremely slow
+// minimizeStops: cost added per charging stop. Dwarfs any realistic trip
+// time (cross-country ≈ 3,000 min), so A* orders routes by stop count
+// first and trip time second. The heuristic ignores it (future penalties
+// are ≥ 0), so admissibility is preserved.
+const STOP_PENALTY_MIN = 100_000;
 
 const START_ID = '__start__';
 const END_ID = '__end__';
@@ -101,6 +106,7 @@ export async function planRoute(
   const prefilterKm = maxRangeKm * RANGE_PREFILTER_FACTOR;
   const maxStops = req.maxStops;
   const trackStops = maxStops !== undefined;
+  const stopPenaltyMin = req.minimizeStops ? STOP_PENALTY_MIN : 0;
 
   const startNode: Supercharger = {
     id: START_ID,
@@ -199,7 +205,7 @@ export async function planRoute(
     if (currentId === END_ID) {
       flushEdgeCache();
       lastMetrics = { expansions, candidates: chargers.length };
-      return reconstruct(edgeIn, byId, gScore.get(currentKey)!, currentKey);
+      return reconstruct(edgeIn, byId, currentKey);
     }
 
     const current = byId.get(currentId)!;
@@ -280,7 +286,11 @@ export async function planRoute(
             )
           : 0;
         const arrival = depSoC - energyPct;
-        const tentativeG = currentG + chargingMin + edge.drivingTimeMin;
+        const tentativeG =
+          currentG +
+          chargingMin +
+          edge.drivingTimeMin +
+          (isEnd || isWaypoint ? 0 : stopPenaltyMin);
 
         const nbKey = makeKey(nb.id, newStopCount, arrival, newWpIndex);
         const prevG = gScore.get(nbKey);
@@ -313,7 +323,6 @@ export async function planRoute(
 function reconstruct(
   edgeIn: Map<string, EdgeRecord>,
   byId: Map<string, Supercharger>,
-  totalTripTimeMin: number,
   endKey: string,
 ): RouteResponse {
   // Walk back from end to start, collecting state keys.
@@ -361,7 +370,9 @@ function reconstruct(
     totalDistanceKm: round(totalDistanceKm),
     totalDrivingTimeMin: round(totalDrivingTimeMin),
     totalChargingTimeMin: round(totalChargingTimeMin),
-    totalTripTimeMin: round(totalTripTimeMin),
+    // Summed from components rather than the final g-score, which carries
+    // artificial stop penalties when minimizeStops is set.
+    totalTripTimeMin: round(totalDrivingTimeMin + totalChargingTimeMin),
   };
 }
 

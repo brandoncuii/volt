@@ -222,6 +222,7 @@ npm test --workspace=server   # 109 vitest cases across A*, heap, validation, co
 
   // optional
   "maxStops": 2,                          // 0–10
+  "minimizeStops": true,                  // fewest charging stops, tie-broken by trip time
   "excludeChargerIds": ["3294"],          // exclude specific chargers
   "restaurantBrandIds": ["in-n-out"]      // ids from shared/src/brands.ts
 }

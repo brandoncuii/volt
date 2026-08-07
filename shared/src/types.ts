@@ -23,6 +23,7 @@ export interface RouteRequest {
   minArrivalBatteryPct: number;  // 0-100, e.g. 10 — must arrive with at least this much
   excludeChargerIds?: string[];   // chargers to exclude from the graph
   maxStops?: number;              // cap on the number of charging stops in the result (0-10)
+  minimizeStops?: boolean;        // optimize for fewest charging stops, tie-broken by trip time
   restaurantBrandIds?: string[];  // when set, server pre-filters chargers to those near these brands
   restaurantQueries?: string[];   // free-text restaurant names; filter chargers like brands, matched against restaurant names
 }
