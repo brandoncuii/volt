@@ -35,6 +35,17 @@ export class VoltStack extends Stack {
       timeToLiveAttribute: 'ttl',
     });
 
+    // Route polyline cache. One Routes API call per unique (grid-snapped)
+    // origin/waypoints/destination combination — popular corridors become a
+    // one-time cost. Road geometry drifts slowly, so entries expire after
+    // 30 days via TTL.
+    const polylineCache = new Table(this, 'PolylineCache', {
+      partitionKey: { name: 'pk', type: AttributeType.STRING },
+      billingMode: BillingMode.PAY_PER_REQUEST,
+      removalPolicy: RemovalPolicy.DESTROY,
+      timeToLiveAttribute: 'ttl',
+    });
+
     // User data table — stores favorites and saved trips per Clerk user.
     const userData = new Table(this, 'UserData', {
       partitionKey: { name: 'pk', type: AttributeType.STRING },
@@ -92,6 +103,7 @@ export class VoltStack extends Stack {
       environment: {
         EDGE_CACHE_TABLE: edgeCache.tableName,
         PLACES_CACHE_TABLE: placesCache.tableName,
+        POLYLINE_CACHE_TABLE: polylineCache.tableName,
         USER_DATA_TABLE: userData.tableName,
         GOOGLE_MAPS_API_KEY: googleMapsApiKey,
         CLERK_SECRET_KEY: process.env.CLERK_SECRET_KEY ?? '',
@@ -100,12 +112,17 @@ export class VoltStack extends Stack {
         // a pre-warmed cache to be feasible inside Lambda's response budget.
         // Flip back to 'false' after writing an offline cache-fill script.
         USE_HAVERSINE_EDGES: 'true',
+        // Route-first planning: 1 cached Routes API call per request gives
+        // road-accurate corridors and edge weights. Haversine above is the
+        // fallback when the polyline is unavailable.
+        USE_ROUTE_POLYLINE: 'true',
         NODE_OPTIONS: '--enable-source-maps',
       },
     });
 
     edgeCache.grantReadWriteData(api);
     placesCache.grantReadWriteData(api);
+    polylineCache.grantReadWriteData(api);
     userData.grantReadWriteData(api);
 
     const httpApi = new HttpApi(this, 'VoltHttpApi', {
@@ -139,6 +156,10 @@ export class VoltStack extends Stack {
 
     new CfnOutput(this, 'PlacesCacheTableName', {
       value: placesCache.tableName,
+    });
+
+    new CfnOutput(this, 'PolylineCacheTableName', {
+      value: polylineCache.tableName,
     });
 
     new CfnOutput(this, 'UserDataTableName', {

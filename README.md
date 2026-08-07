@@ -20,13 +20,15 @@ flowchart LR
 
     subgraph Server [Express server]
         API --> Corridor["1.4× ellipse<br/>corridor prefilter"]
-        Corridor --> BrandFilter{brand filter?}
-        BrandFilter -->|yes| InnerCorridor["1.3× ellipse +<br/>filter by brand"]
+        Corridor --> Polyline["driving polyline<br/>(1 cached Routes API call)"]
+        Polyline -->|miss| GMaps
+        Polyline --> RoadCorridor["≤8 km from road,<br/>widened over gaps"]
+        RoadCorridor --> BrandFilter{brand filter?}
+        BrandFilter -->|yes| InnerCorridor["filter by brand"]
         BrandFilter -->|no| AStar
         InnerCorridor -->|Places API per charger| GMaps
         InnerCorridor --> AStar["state-augmented A*"]
-        AStar -->|Haversine or<br/>Distance Matrix| Edges["edge weight provider<br/>+ JSON file cache"]
-        Edges -->|miss| GMaps
+        AStar --> Edges["distance-along-route<br/>edge weights (no API calls)"]
         AStar --> Response[RouteResponse]
     end
 ```
@@ -36,24 +38,41 @@ flowchart LR
 | `client/` | React 19 + TS + Vite + Tailwind v4 + shadcn/ui (Nova). Route form, map (`@react-google-maps/api`), Places autocomplete, results panel with per-stop restaurants. Deploys to Vercel |
 | `server/` | Express 5 (ESM) + TS. Routing engine, places proxy. Runs locally as `tsx watch` and in production as an AWS Lambda (via `serverless-http`) behind API Gateway. Rate-limited at 30 req/min/IP |
 | `shared/` | `@volt/shared` workspace — wire types (`RouteRequest`, `RouteResponse`, `Restaurant`, `Brand`) used by both sides |
-| `infra/` | AWS CDK app (`VoltStack`) — provisions the Lambda, API Gateway HTTP API, and two DynamoDB tables (edge-weight cache + places cache with TTL) |
+| `infra/` | AWS CDK app (`VoltStack`) — provisions the Lambda, API Gateway HTTP API, and three DynamoDB tables (edge-weight cache + places cache and polyline cache with TTL) |
 
-Caches are dual-mode: locally the server writes JSON files under `server/src/data/`; in Lambda it reads/writes the DynamoDB tables injected via `EDGE_CACHE_TABLE` and `PLACES_CACHE_TABLE`.
+Caches are dual-mode: locally the server writes JSON files under `server/src/data/`; in Lambda it reads/writes the DynamoDB tables injected via `EDGE_CACHE_TABLE`, `PLACES_CACHE_TABLE`, and `POLYLINE_CACHE_TABLE`.
 
 ## Routing algorithm
 
 The graph is dense in the dataset (every charger is a potential node) but
-sparse for any given trip after two prefilters:
+sparse for any given trip after three prefilters:
 
-1. **Spatial corridor.** Before A\* runs, candidate chargers are reduced to
-   those inside an ellipse with foci at the start and end points where
+1. **Spatial corridor.** Candidate chargers are first reduced to those
+   inside an ellipse with foci at the start and end points where
    `haversine(start, c) + haversine(c, end) ≤ 1.4 × haversine(start, end)`.
-   This drops a SF→LA search from 2,711 candidates to ~480, and a
-   coast-to-coast NYC→LA from 2,711 to ~2,679 (still most of the country).
-2. **Brand corridor** (only when the user picks restaurant brands). A
-   tighter 1.3× ellipse, then a parallel Places API lookup keeps only
-   chargers near a matching brand. Results are cached so the second call
-   on the same corridor pays no API cost.
+   This drops a SF→LA search from 2,711 candidates to ~480 and is cheap
+   enough to run on every request — it bounds the cost of the next step.
+2. **Route-first corridor** (`USE_ROUTE_POLYLINE=true`, the default). One
+   Routes API call (`TRAFFIC_UNAWARE`, so it bills on the cheap Compute
+   Routes Essentials SKU; cached by grid-snapped endpoints with a 30-day
+   TTL) fetches the actual driving polyline. Every ellipse survivor is
+   projected onto it, keeping only chargers within 8 km of the road.
+   Where that leaves a stretch of road longer than `0.9 × vehicleRangeKm`
+   without a charger, the corridor widens locally (25 km, then 60 km) so
+   sparse regions stay solvable. Portland→LA drops from 767 ellipse
+   candidates to ~85 actual I-5 chargers. If the Routes API is
+   unavailable, the planner falls back to the plain ellipse + haversine
+   behavior.
+3. **Brand corridor** (only when the user picks restaurant brands). A
+   parallel Places API lookup keeps only chargers near a matching brand.
+   Results are cached so the second call on the same corridor pays no
+   API cost.
+
+Edge weights come from the polyline too: the road distance between two
+chargers is the difference of their along-route positions plus one
+off-road leg per endpoint, and driving time uses the route's real average
+speed — road-accurate edges with **zero** per-pair API calls (the old
+Haversine × 1.2 and Distance Matrix providers remain as fallbacks).
 
 A\* itself uses:
 
@@ -90,9 +109,16 @@ can beat one long stop.
 
 ## Performance
 
-All numbers below are local development with `USE_HAVERSINE_EDGES=true`
-(no external Distance Matrix calls in the benchmark). End-to-end means
-curl-to-response.
+All numbers below predate the route-first corridor and were measured with
+`USE_ROUTE_POLYLINE=false` and `USE_HAVERSINE_EDGES=true` (no external
+API calls in the benchmark). End-to-end means curl-to-response.
+
+With route-first planning on (the default), the candidate set shrinks to
+chargers actually on the highway, so the search gets faster on top of
+being road-accurate: Portland→LA runs at 85 candidates / ~1,100
+expansions / ~65 ms warm (~700 ms on a polyline-cache miss), versus 767
+candidates / ~6,500 expansions / ~2.2 s for the same trip through the
+ellipse fallback.
 
 | Route | Candidates after corridor | A\* expansions | Stops | Latency |
 |---|---:|---:|---:|---:|
@@ -142,7 +168,7 @@ at DynamoDB by setting `PLACES_CACHE_TABLE` before running it.
 ### Prerequisites
 
 - Node.js 20+
-- A [Google Maps API key](https://console.cloud.google.com/apis/credentials) with **Maps JavaScript API**, **Places API (new)**, and **Geocoding API** enabled. Distance Matrix is optional — see env vars below.
+- A [Google Maps API key](https://console.cloud.google.com/apis/credentials) with **Maps JavaScript API**, **Places API (new)**, **Routes API**, and **Geocoding API** enabled. Distance Matrix is optional — see env vars below.
 
 ### Setup
 
@@ -165,7 +191,7 @@ The client's Vite dev server proxies `/api/*` to the backend.
 ### Test
 
 ```bash
-npm test --workspace=server   # 63 vitest cases across A*, heap, validation, corridor, places
+npm test --workspace=server   # 109 vitest cases across A*, heap, validation, corridor, polyline, projection, places
 ```
 
 ## Configuration
@@ -174,10 +200,12 @@ npm test --workspace=server   # 63 vitest cases across A*, heap, validation, cor
 |---|---|---|
 | `VITE_GOOGLE_MAPS_API_KEY` | `client/.env` | Maps JS SDK key. Restrict by HTTP referrer in production |
 | `VITE_API_URL` | `client/.env` | Optional. Leave blank for local dev (Vite proxies `/api/*` to the local server). In production set to the API Gateway URL printed by `cdk deploy` |
-| `GOOGLE_MAPS_API_KEY` | `server/.env` / Lambda env | Server-side key used for Places (new) + optional Distance Matrix. Restrict by IP in production |
-| `USE_HAVERSINE_EDGES` | `server/.env` / Lambda env | `true` (default) approximates edges with Haversine × 1.2 detour at 88 km/h. `false` uses the real Distance Matrix API. In Lambda stay on Haversine until the edge cache is pre-warmed |
+| `GOOGLE_MAPS_API_KEY` | `server/.env` / Lambda env | Server-side key used for Places (new) + Routes + optional Distance Matrix. Restrict by IP in production |
+| `USE_ROUTE_POLYLINE` | `server/.env` / Lambda env | `true` (default) plans route-first: one cached Routes API call per request gives the driving polyline used for the corridor and edge weights. `false` (or any polyline failure) falls back to the ellipse corridor with the edge provider below |
+| `USE_HAVERSINE_EDGES` | `server/.env` / Lambda env | Fallback edge provider when the polyline is unavailable. `true` (default) approximates edges with Haversine × 1.2 detour at 88 km/h. `false` uses the real Distance Matrix API. In Lambda stay on Haversine until the edge cache is pre-warmed |
 | `EDGE_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for edge weights. Unset locally → falls back to `server/src/data/edge-cache.json` |
 | `PLACES_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for restaurant lookups (with 90-day TTL). Unset locally → falls back to `server/src/data/places-cache.json` |
+| `POLYLINE_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for driving polylines (30-day TTL, keyed by ~2 km grid-snapped endpoints). Unset locally → falls back to `server/src/data/polyline-cache.json` |
 | `PORT` | `server/.env` | Server port (default 3001) |
 
 ## API
@@ -199,7 +227,7 @@ npm test --workspace=server   # 63 vitest cases across A*, heap, validation, cor
 }
 ```
 
-Returns `{ stops, totalDistanceKm, totalDrivingTimeMin, totalChargingTimeMin, totalTripTimeMin }`. Each stop carries the charger, arrival/departure battery %, charging time, and distance + drive time from the previous waypoint.
+Returns `{ stops, totalDistanceKm, totalDrivingTimeMin, totalChargingTimeMin, totalTripTimeMin, encodedPolyline? }`. Each stop carries the charger, arrival/departure battery %, charging time, and distance + drive time from the previous waypoint. `encodedPolyline` is the driving route geometry (present when route-first planning is active); the client draws it on the map.
 
 ### `POST /api/places`
 

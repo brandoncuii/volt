@@ -44,6 +44,9 @@ export interface RouteResponse {
   totalDrivingTimeMin: number;
   totalChargingTimeMin: number;
   totalTripTimeMin: number;
+  // Encoded polyline of the driving route (start → waypoints → end) when the
+  // route-first planner is active. Absent in the haversine fallback.
+  encodedPolyline?: string;
 }
 
 // Standard error shape for all endpoints

@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef } from 'react';
 import { GoogleMap, MarkerF, PolylineF } from '@react-google-maps/api';
-import type { RouteResponse } from '@volt/shared';
+import { decodePolyline, type RouteResponse } from '@volt/shared';
 
 type LatLng = { lat: number; lng: number };
 
@@ -51,9 +51,12 @@ export function MapView({ result, start, end, waypoints }: Props) {
 
   const polylinePath = (() => {
     if (!start || !end) return null;
-    // The response lists only charging stops; waypoints aren't in it. Order
-    // all intermediate points by their projection onto the start→end axis so
-    // the line threads through them roughly in travel order.
+    // Prefer the real road geometry when the server planned route-first.
+    // (It follows start → waypoints → end; charger stops sit just off it.)
+    if (result?.encodedPolyline) return decodePolyline(result.encodedPolyline);
+    // Fallback: the response lists only charging stops; waypoints aren't in
+    // it. Order all intermediate points by their projection onto the
+    // start→end axis so the line threads through them roughly in travel order.
     const intermediates: LatLng[] = [
       ...(result?.stops.map((s) => s.charger.location) ?? []),
       ...wps,

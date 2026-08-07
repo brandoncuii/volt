@@ -2,8 +2,13 @@ import { Router, Request, Response } from 'express';
 import type { RouteRequest, ApiError, Supercharger } from '@volt/shared';
 import { findBrand, type Brand } from '@volt/shared';
 import { loadSuperchargers } from '../data/loader.js';
-import { planRoute, getLastPlanMetrics } from '../algo/aStar.js';
-import { chargersInCorridor } from '../graph/corridor.js';
+import {
+  planRoute,
+  getLastPlanMetrics,
+  RANGE_PREFILTER_FACTOR,
+  type PlanOptions,
+} from '../algo/aStar.js';
+import { chargersInCorridor, chargersAlongRoute } from '../graph/corridor.js';
 import {
   filterChargersByBrand,
   flushPlacesCache,
@@ -11,6 +16,15 @@ import {
   resetPlacesStats,
 } from '../places/placesClient.js';
 import { getEdgeStats, resetEdgeStats } from '../graph/edges.js';
+import {
+  getRoutePolyline,
+  useRoutePolyline,
+  flushPolylineCache,
+  getPolylineStats,
+  resetPolylineStats,
+} from '../graph/routePolyline.js';
+import { buildRouteIndex, type Projection } from '../graph/projection.js';
+import { makePolylineEdgeProvider } from '../graph/polylineEdges.js';
 
 export const routeRouter = Router();
 
@@ -130,6 +144,7 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
 
   resetEdgeStats();
   resetPlacesStats();
+  resetPolylineStats();
   const t0 = performance.now();
 
   try {
@@ -166,6 +181,39 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
     chargers = unionCorridor(chargers, 1.4);
     const corridorSize = chargers.length;
 
+    // Route-first refinement: fetch the actual driving polyline (one cached
+    // Routes API call), keep only chargers near the road, and derive edge
+    // weights from distance along it. The ellipse above stays as a cheap
+    // prefilter so projection only runs on plausible candidates. Any failure
+    // (missing key, quota, outage) falls back to the ellipse + haversine path.
+    let planOpts: PlanOptions | undefined;
+    let encodedPolyline: string | undefined;
+    if (useRoutePolyline()) {
+      try {
+        const route = await getRoutePolyline(points);
+        flushPolylineCache();
+        const index = buildRouteIndex(route.points);
+        const projections = new Map<string, Projection>();
+        chargers = chargersAlongRoute(
+          chargers,
+          index,
+          parsed.vehicleRangeKm * RANGE_PREFILTER_FACTOR,
+          projections,
+        );
+        const avgSpeedKmh = route.distanceKm / (route.drivingTimeMin / 60);
+        planOpts = {
+          edgeProvider: makePolylineEdgeProvider(index, projections, avgSpeedKmh),
+          avgSpeedKmh,
+        };
+        encodedPolyline = route.encoded;
+      } catch (e) {
+        console.warn(
+          `[route] polyline unavailable, falling back to ellipse corridor: ` +
+          `${e instanceof Error ? e.message : e}`,
+        );
+      }
+    }
+
     const brandFilters: Brand[] = [
       ...(parsed.restaurantBrandIds ?? [])
         .map((id) => findBrand(id))
@@ -180,21 +228,25 @@ routeRouter.post('/route', async (req: Request, res: Response) => {
         })),
     ];
     if (brandFilters.length > 0) {
-      const corridor = unionCorridor(chargers);
+      // The polyline corridor is already tighter than the brand ellipse.
+      const corridor = planOpts ? chargers : unionCorridor(chargers);
       chargers = await filterChargersByBrand(corridor, brandFilters);
       flushPlacesCache();
     }
 
-    const result = await planRoute(chargers, parsed);
+    const result = await planRoute(chargers, parsed, planOpts);
+    if (encodedPolyline) result.encodedPolyline = encodedPolyline;
     const ms = performance.now() - t0;
     const pm = getLastPlanMetrics();
     const es = getEdgeStats();
     const ps = getPlacesStats();
+    const ys = getPolylineStats();
     console.log(
       `[route] all=${totalChargers} corridor=${corridorSize} candidates=${pm.candidates} ` +
       `expansions=${pm.expansions} stops=${result.stops.length} ` +
       `edges(hit/miss/haversine)=${es.hits}/${es.misses}/${es.haversineCalls} ` +
       `places(mem/ddb/miss)=${ps.memHits}/${ps.ddbHits}/${ps.misses} ` +
+      `polyline(mem/ddb/miss)=${ys.memHits}/${ys.ddbHits}/${ys.misses} ` +
       `t=${ms.toFixed(0)}ms`,
     );
     return res.json(result);

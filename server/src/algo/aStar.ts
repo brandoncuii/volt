@@ -6,14 +6,29 @@ import type {
 } from '@volt/shared';
 import { haversineKm } from '../graph/haversine.js';
 import { chargeTimeMin } from './chargingCurve.js';
-import { getEdgeWeight, flushEdgeCache } from '../graph/edges.js';
+import { getEdgeWeight, flushEdgeCache, type EdgeWeight } from '../graph/edges.js';
 import { MinHeap } from './heap.js';
+
+export type EdgeProvider = (
+  a: Supercharger,
+  b: Supercharger,
+) => EdgeWeight | Promise<EdgeWeight>;
+
+export interface PlanOptions {
+  // Per-request edge weights (e.g. distance-along-polyline). Defaults to the
+  // global getEdgeWeight (haversine or Distance Matrix).
+  edgeProvider?: EdgeProvider;
+  // Average speed the edge provider's driving times are based on. The
+  // heuristic divides by max(AVG_SPEED_KMH, this) so it stays admissible
+  // when real road speeds exceed the default.
+  avgSpeedKmh?: number;
+}
 
 // Tesla-ish efficiency: ~155 Wh/km → batteryCapacityKWh = rangeKm * 0.155.
 const EFFICIENCY_KWH_PER_KM = 0.155;
 const SAFETY_BUFFER_PCT = 10; // min arrival battery at intermediate stops
 const AVG_SPEED_KMH = 88; // for the A* heuristic
-const RANGE_PREFILTER_FACTOR = 0.9; // skip edges Haversine-close to the range limit
+export const RANGE_PREFILTER_FACTOR = 0.9; // skip edges Haversine-close to the range limit
 const SOC_BUCKET_SIZE = 5; // 5% granularity → 20 buckets
 const MAX_DEPARTURE_SOC = 95; // charging above 95% is extremely slow
 
@@ -77,7 +92,10 @@ function parseKey(key: string): {
 export async function planRoute(
   chargers: Supercharger[],
   req: RouteRequest,
+  opts?: PlanOptions,
 ): Promise<RouteResponse> {
+  const edgeProvider = opts?.edgeProvider ?? getEdgeWeight;
+  const heuristicSpeedKmh = Math.max(AVG_SPEED_KMH, opts?.avgSpeedKmh ?? 0);
   const maxRangeKm = req.vehicleRangeKm;
   const batteryCapacityKWh = maxRangeKm * EFFICIENCY_KWH_PER_KM;
   const prefilterKm = maxRangeKm * RANGE_PREFILTER_FACTOR;
@@ -129,7 +147,7 @@ export async function planRoute(
       from = wpNodes[k]!.location;
     }
     dist += haversineKm(from, endNode.location);
-    return (dist / AVG_SPEED_KMH) * 60;
+    return (dist / heuristicSpeedKmh) * 60;
   }
 
   // Charger neighbor lists depend only on node id (prefilterKm and the
@@ -212,7 +230,7 @@ export async function planRoute(
 
       if (trackStops && !isEnd && !isWaypoint && newStopCount > maxStops) continue;
 
-      const edge = await getEdgeWeight(current, nb);
+      const edge = await edgeProvider(current, nb);
 
       const energyPct = (edge.distanceKm / maxRangeKm) * 100;
       if (energyPct >= 100) continue;
