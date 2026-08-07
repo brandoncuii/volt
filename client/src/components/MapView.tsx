@@ -9,12 +9,27 @@ interface Props {
   start: LatLng | null;
   end: LatLng | null;
   waypoints?: LatLng[];
+  onStopClick?: (chargerId: string) => void;
 }
 
 const containerStyle = { width: '100%', height: '100%' };
 
 // California center as a sensible default.
 const defaultCenter = { lat: 36.7783, lng: -119.4179 };
+
+// Text badge rendered above the marker (pill styling via .map-marker-label CSS).
+// color/fontSize/fontWeight must be passed here rather than left to the class:
+// Maps writes its own defaults inline on the label element, which would win.
+// `dot` shifts the badge less, for the small circle waypoint markers.
+function endpointLabel(text: string, dot = false): google.maps.MarkerLabel {
+  return {
+    text,
+    className: dot ? 'map-marker-label map-marker-label--dot' : 'map-marker-label',
+    color: 'white',
+    fontSize: '11px',
+    fontWeight: '600',
+  };
+}
 
 const mapOptions: google.maps.MapOptions = {
   disableDefaultUI: true,
@@ -26,7 +41,7 @@ const mapOptions: google.maps.MapOptions = {
   ],
 };
 
-export function MapView({ result, start, end, waypoints }: Props) {
+export function MapView({ result, start, end, waypoints, onStopClick }: Props) {
   const mapRef = useRef<google.maps.Map | null>(null);
   const wps = waypoints ?? [];
 
@@ -79,16 +94,17 @@ export function MapView({ result, start, end, waypoints }: Props) {
       onLoad={onLoad}
     >
       {start && (
-        <MarkerF position={start} label={{ text: 'A', color: 'white', fontWeight: '600' }} />
+        <MarkerF position={start} title="Start" label={endpointLabel('Start')} />
       )}
       {end && (
-        <MarkerF position={end} label={{ text: 'B', color: 'white', fontWeight: '600' }} />
+        <MarkerF position={end} title="Destination" label={endpointLabel('Destination')} />
       )}
       {wps.map((w, i) => (
         <MarkerF
           key={`wp-${i}`}
           position={w}
           title={`Stop ${i + 1}`}
+          label={endpointLabel(`Stop ${i + 1}`, true)}
           icon={{
             path: google.maps.SymbolPath.CIRCLE,
             scale: 8,
@@ -105,6 +121,7 @@ export function MapView({ result, start, end, waypoints }: Props) {
           position={stop.charger.location}
           label={{ text: String(i + 1), color: 'white', fontWeight: '600' }}
           title={stop.charger.name}
+          onClick={() => onStopClick?.(stop.charger.id)}
         />
       ))}
       {polylinePath && (

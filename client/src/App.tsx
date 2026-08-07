@@ -57,6 +57,8 @@ function App() {
     waypoints?: { lat: number; lng: number }[];
   } | null>(null);
   const [selectedBrands, setSelectedBrands] = useState<Brand[]>([]);
+  // Object (not plain string) so re-clicking the same marker re-triggers the scroll.
+  const [selectedStop, setSelectedStop] = useState<{ id: string } | null>(null);
   const [customTerms, setCustomTerms] = useState<string[]>([]);
   const [partialFit, setPartialFit] = useState(false);
   const [lastRequest, setLastRequest] = useState<RouteRequest | null>(null);
@@ -102,6 +104,7 @@ function App() {
     setResult(null);
     setRestaurants(null);
     setPartialFit(false);
+    setSelectedStop(null);
     setEndpoints({ start: req.start, end: req.end, waypoints: req.waypoints });
     setLastRequest(req);
 
@@ -245,6 +248,7 @@ function App() {
           {result && (
             <ResultsPanel
               result={result}
+              selectedStop={selectedStop}
               restaurants={restaurants}
               restaurantsLoading={restaurantsLoading}
               selectedBrands={selectedBrands}
@@ -263,6 +267,7 @@ function App() {
               start={endpoints?.start ?? null}
               end={endpoints?.end ?? null}
               waypoints={endpoints?.waypoints}
+              onStopClick={(id) => setSelectedStop({ id })}
             />
           ) : (
             <div className="h-full w-full grid place-items-center text-muted-foreground text-sm">

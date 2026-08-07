@@ -1,3 +1,4 @@
+import { useEffect, useRef } from 'react';
 import type {
   RouteResponse,
   PlacesResponse,
@@ -34,6 +35,7 @@ import { cn } from '@/lib/utils';
 
 interface Props {
   result: RouteResponse;
+  selectedStop?: { id: string } | null;
   restaurants: PlacesResponse | null;
   restaurantsLoading: boolean;
   selectedBrands: Brand[];
@@ -69,6 +71,7 @@ function priceLevelToDollars(level: PriceLevel | undefined): string {
 
 export function ResultsPanel({
   result,
+  selectedStop,
   restaurants,
   restaurantsLoading,
   selectedBrands,
@@ -77,6 +80,14 @@ export function ResultsPanel({
   isFavorite,
   onToggleFavorite,
 }: Props) {
+  const stopRefs = useRef<Map<string, HTMLLIElement>>(new Map());
+
+  useEffect(() => {
+    if (!selectedStop) return;
+    const el = stopRefs.current.get(selectedStop.id);
+    el?.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  }, [selectedStop]);
+
   return (
     <Card>
       <CardHeader>
@@ -122,10 +133,18 @@ export function ResultsPanel({
                 restaurants !== null &&
                 !chargerSatisfiesBrands(list, selectedBrands);
               const favorited = isFavorite?.('charger', stop.charger.id) ?? false;
+              const isSelected = selectedStop?.id === stop.charger.id;
               return (
                 <li
                   key={stop.charger.id}
-                  className="rounded-md border p-3 space-y-2"
+                  ref={(el) => {
+                    if (el) stopRefs.current.set(stop.charger.id, el);
+                    else stopRefs.current.delete(stop.charger.id);
+                  }}
+                  className={cn(
+                    'rounded-md border p-3 space-y-2 transition-colors',
+                    isSelected && 'border-primary ring-2 ring-primary/40 bg-accent/40',
+                  )}
                 >
                   <div className="flex items-start justify-between gap-2">
                     <div className="flex items-start gap-2 min-w-0">
