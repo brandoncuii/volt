@@ -35,12 +35,12 @@ flowchart LR
 
 | Layer | What's in it |
 |---|---|
-| `client/` | React 19 + TS + Vite + Tailwind v4 + shadcn/ui (Nova). Route form, map (`@react-google-maps/api`), Places autocomplete, results panel with per-stop restaurants. Deploys to Vercel |
-| `server/` | Express 5 (ESM) + TS. Routing engine, places proxy. Runs locally as `tsx watch` and in production as an AWS Lambda (via `serverless-http`) behind API Gateway. Rate-limited at 30 req/min/IP |
+| `client/` | React 19 + TS + Vite + Tailwind v4 + shadcn/ui (Nova). Route form, map (`@react-google-maps/api`), Places autocomplete, results panel with per-stop restaurants. Optional Clerk auth. Deploys to Vercel |
+| `server/` | Express 5 (ESM) + TS. Routing engine, places proxy, Clerk auth middleware, and DynamoDB-backed user data. Runs locally as `tsx watch` and in production as an AWS Lambda (via `serverless-http`) behind API Gateway. Rate-limited at 30 req/min/IP |
 | `shared/` | `@volt/shared` workspace — wire types (`RouteRequest`, `RouteResponse`, `Restaurant`, `Brand`) used by both sides |
-| `infra/` | AWS CDK app (`VoltStack`) — provisions the Lambda, API Gateway HTTP API, and three DynamoDB tables (edge-weight cache + places cache and polyline cache with TTL) |
+| `infra/` | AWS CDK app (`VoltStack`) — provisions the Lambda, API Gateway HTTP API, and four DynamoDB tables (edge-weight cache, places cache, polyline cache with TTL, and user data) |
 
-Caches are dual-mode: locally the server writes JSON files under `server/src/data/`; in Lambda it reads/writes the DynamoDB tables injected via `EDGE_CACHE_TABLE`, `PLACES_CACHE_TABLE`, and `POLYLINE_CACHE_TABLE`.
+Caches and user data are dual-mode: locally the server writes JSON files under `server/src/data/`; in Lambda it reads/writes the DynamoDB tables injected via `EDGE_CACHE_TABLE`, `PLACES_CACHE_TABLE`, `POLYLINE_CACHE_TABLE`, and `USER_DATA_TABLE`.
 
 ## Routing algorithm
 
@@ -169,6 +169,7 @@ at DynamoDB by setting `PLACES_CACHE_TABLE` before running it.
 
 - Node.js 20+
 - A [Google Maps API key](https://console.cloud.google.com/apis/credentials) with **Maps JavaScript API**, **Places API (new)**, **Routes API**, and **Geocoding API** enabled. Distance Matrix is optional — see env vars below.
+- (Optional) A [Clerk](https://clerk.com/) account for the saved-trips and favorites features. Auth is optional locally; the planner works without it.
 
 ### Setup
 
@@ -176,7 +177,7 @@ at DynamoDB by setting `PLACES_CACHE_TABLE` before running it.
 npm install
 cp client/.env.example client/.env
 cp server/.env.example server/.env
-# add your key to both as described below
+# Add your Google Maps keys; Clerk is optional for local dev.
 ```
 
 ### Run
@@ -191,7 +192,7 @@ The client's Vite dev server proxies `/api/*` to the backend.
 ### Test
 
 ```bash
-npm test --workspace=server   # 109 vitest cases across A*, heap, validation, corridor, polyline, projection, places
+npm test --workspace=server   # 112 vitest cases across A*, heap, validation, corridor, polyline, projection, places
 ```
 
 ## Configuration
@@ -200,6 +201,7 @@ npm test --workspace=server   # 109 vitest cases across A*, heap, validation, co
 |---|---|---|
 | `VITE_GOOGLE_MAPS_API_KEY` | `client/.env` | Maps JS SDK key. Restrict by HTTP referrer in production |
 | `VITE_API_URL` | `client/.env` | Optional. Leave blank for local dev (Vite proxies `/api/*` to the local server). In production set to the API Gateway URL printed by `cdk deploy` |
+| `VITE_CLERK_PUBLISHABLE_KEY` | `client/.env` | Optional Clerk publishable key. Auth features (saved trips, favorites) are disabled when blank |
 | `GOOGLE_MAPS_API_KEY` | `server/.env` / Lambda env | Server-side key used for Places (new) + Routes + optional Distance Matrix. Restrict by IP in production |
 | `USE_ROUTE_POLYLINE` | `server/.env` / Lambda env | `true` (default) plans route-first: one cached Routes API call per request gives the driving polyline used for the corridor and edge weights. `false` (or any polyline failure) falls back to the ellipse corridor with the edge provider below |
 | `USE_HAVERSINE_EDGES` | `server/.env` / Lambda env | Fallback edge provider when the polyline is unavailable. `true` (default) approximates edges with Haversine × 1.2 detour at 88 km/h. `false` uses the real Distance Matrix API. In Lambda stay on Haversine until the edge cache is pre-warmed |
@@ -207,6 +209,17 @@ npm test --workspace=server   # 109 vitest cases across A*, heap, validation, co
 | `PLACES_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for restaurant lookups (with 90-day TTL). Unset locally → falls back to `server/src/data/places-cache.json` |
 | `POLYLINE_CACHE_TABLE` | Lambda env (set by CDK) | DynamoDB table for driving polylines (30-day TTL, keyed by ~2 km grid-snapped endpoints). Unset locally → falls back to `server/src/data/polyline-cache.json` |
 | `PORT` | `server/.env` | Server port (default 3001) |
+| `CLERK_SECRET_KEY` | `server/.env` / Lambda env | Clerk secret key for saved-trips and favorites. Leave blank to run without auth locally |
+| `USER_DATA_TABLE` | Lambda env (set by CDK) | DynamoDB table for user favorites and saved trips. Unset locally → falls back to `server/src/data/user-data.json` |
+
+## Authentication
+
+Saved trips and favorites are protected by [Clerk](https://clerk.com/). Set
+`VITE_CLERK_PUBLISHABLE_KEY` in `client/.env` and `CLERK_SECRET_KEY` in
+`server/.env` to enable them. The client sends the Clerk session token as
+`Authorization: Bearer <token>`; the server verifies it with `@clerk/backend`.
+Auth is optional for local route planning — leave both keys blank and the
+planner still works, with the protected endpoints returning 401/503.
 
 ## API
 
@@ -221,10 +234,14 @@ npm test --workspace=server   # 109 vitest cases across A*, heap, validation, co
   "minArrivalBatteryPct": 10,
 
   // optional
+  "waypoints": [                          // max 5 intermediate points
+    { "lat": 36.0, "lng": -120.0 }
+  ],
   "maxStops": 2,                          // 0–10
   "minimizeStops": true,                  // fewest charging stops, tie-broken by trip time
   "excludeChargerIds": ["3294"],          // exclude specific chargers
-  "restaurantBrandIds": ["in-n-out"]      // ids from shared/src/brands.ts
+  "restaurantBrandIds": ["in-n-out"],     // ids from shared/src/brands.ts
+  "restaurantQueries": ["tacos"]          // max 5, max 64 chars each; free-text brand/food filters
 }
 ```
 
@@ -241,6 +258,24 @@ Returns a map of charger id → up to 6 nearby restaurants (name, formatted addr
 ### `GET /api/health`
 
 Returns service status.
+
+### `GET /api/trips`, `POST /api/trips`, `PATCH /api/trips/:tripId`, `DELETE /api/trips/:tripId`
+
+Protected by Clerk. Signed-in users can save, list, rename, and delete
+`RouteRequest` payloads for quick re-routing.
+
+- `GET /api/trips` — list: `[{ tripId, name, request, createdAt }]`
+- `POST /api/trips` — save: `{ "name": "SFO → LAX", "request": <RouteRequest> }`
+- `PATCH /api/trips/:tripId` — rename: `{ "name": "new name" }`
+- `DELETE /api/trips/:tripId` — delete
+
+### `GET /api/favorites`, `POST /api/favorites`, `DELETE /api/favorites/:type/:id`
+
+Protected by Clerk. Favorites can be chargers or brands.
+
+- `GET /api/favorites` — list: `[{ type, id, createdAt }]`
+- `POST /api/favorites` — add: `{ "type": "charger" | "brand", "id": "..." }`
+- `DELETE /api/favorites/:type/:id` — remove
 
 ## Deployment
 
